@@ -3,7 +3,7 @@ import { CameraSettings, FilterPreset, KeyboardSettings, DetectedChord } from '.
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { ChordDisplay } from './ChordDisplay';
 import { getCombinedFilterStyle } from '../utils/filterPresets';
-import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone } from 'lucide-react';
+import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone, Play } from 'lucide-react';
 import { IOSPermissionGuideModal } from './IOSPermissionGuideModal';
 
 interface CameraViewProps {
@@ -46,17 +46,18 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean>(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
   const [isIOSGuideOpen, setIsIOSGuideOpen] = useState<boolean>(false);
   const [isAttempting, setIsAttempting] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Detect iOS environment
+  // Detect iOS WebKit environment
   const isIOS =
     typeof navigator !== 'undefined' &&
     (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
-  // Initialize Camera with robust progressive fallback for iOS Safari and PWA
+  // Initialize Camera for iOS Safari and PWA (pure video, audio: false to prevent iOS recording pill)
   const initCamera = useCallback(async () => {
     setIsAttempting(true);
     setCameraError(null);
@@ -75,43 +76,29 @@ export const CameraView: React.FC<CameraViewProps> = ({
     let mediaStream: MediaStream | null = null;
     let lastErrorMsg = '';
 
-    // Step 1: Ideal constraints (with audio if requested)
+    // Step 1: Standard mobile constraints with ideal facingMode
+    // CRITICAL: audio is strictly false for preview to prevent iPhone from showing red/orange recording indicators
     try {
       const constraints: MediaStreamConstraints = {
         video: {
-          facingMode: cameraSettings.facingMode,
-          width: {
-            ideal:
-              cameraSettings.resolution === '4K'
-                ? 3840
-                : cameraSettings.resolution === '1080P'
-                ? 1920
-                : 1280,
-          },
-          height: {
-            ideal:
-              cameraSettings.resolution === '4K'
-                ? 2160
-                : cameraSettings.resolution === '1080P'
-                ? 1080
-                : 720,
-          },
-          frameRate: { ideal: cameraSettings.fps },
+          facingMode: { ideal: cameraSettings.facingMode },
+          width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+          height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
         },
-        audio: cameraSettings.micEnabled,
+        audio: false,
       };
       mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err1: any) {
       lastErrorMsg = err1?.message || 'Falha ao solicitar resolução ideal';
-      console.warn('Strategy 1 failed, trying video-only without audio...', err1);
+      console.warn('Strategy 1 failed, trying 720p...', err1);
     }
 
-    // Step 2: Video-only fallback (critical on iOS when mic is restricted or conflicting)
+    // Step 2: 720p fallback
     if (!mediaStream) {
       try {
         const constraints: MediaStreamConstraints = {
           video: {
-            facingMode: cameraSettings.facingMode,
+            facingMode: { ideal: cameraSettings.facingMode },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -128,7 +115,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     if (!mediaStream) {
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: cameraSettings.facingMode },
+          video: { facingMode: { ideal: cameraSettings.facingMode } },
           audio: false,
         });
       } catch (err3: any) {
@@ -155,21 +142,28 @@ export const CameraView: React.FC<CameraViewProps> = ({
     if (!mediaStream) {
       setCameraError(lastErrorMsg || 'Não foi possível acessar o sensor da câmera.');
       setHasPermission(false);
+      setIsVideoPlaying(false);
       return;
     }
 
     setStream(mediaStream);
     setHasPermission(true);
 
-    if (videoRef.current) {
-      videoRef.current.srcObject = mediaStream;
-      videoRef.current.setAttribute('playsinline', 'true');
-      videoRef.current.setAttribute('webkit-playsinline', 'true');
-      videoRef.current.muted = true;
+    // Immediately attach stream to video element
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = mediaStream;
+      video.muted = true;
+      // @ts-ignore
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
       try {
-        await videoRef.current.play();
+        await video.play();
+        setIsVideoPlaying(true);
       } catch (playErr) {
-        console.log('Video play caught on iOS:', playErr);
+        console.log('Video play waiting for gesture:', playErr);
       }
     }
 
@@ -191,13 +185,55 @@ export const CameraView: React.FC<CameraViewProps> = ({
   }, [
     cameraSettings.facingMode,
     cameraSettings.resolution,
-    cameraSettings.fps,
-    cameraSettings.micEnabled,
     cameraSettings.flashEnabled,
     videoRef,
     stream,
   ]);
 
+  // Dedicated effect ensuring stream is ALWAYS attached to videoRef and played
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+
+    video.srcObject = stream;
+    video.muted = true;
+    // @ts-ignore
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+
+    const handlePlaying = () => {
+      setIsVideoPlaying(true);
+      setCameraError(null);
+    };
+
+    video.addEventListener('playing', handlePlaying);
+
+    const tryPlay = () => {
+      video
+        .play()
+        .then(() => {
+          setIsVideoPlaying(true);
+          setCameraError(null);
+        })
+        .catch((err) => {
+          console.log('Autoplay blocked by iOS until user interaction:', err);
+        });
+    };
+
+    if (video.readyState >= 2) {
+      tryPlay();
+    } else {
+      video.addEventListener('loadedmetadata', tryPlay, { once: true });
+    }
+
+    return () => {
+      video.removeEventListener('playing', handlePlaying);
+    };
+  }, [stream, videoRef]);
+
+  // Initialize camera on mount and when facing mode changes
   useEffect(() => {
     initCamera();
 
@@ -206,7 +242,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [cameraSettings.facingMode, cameraSettings.resolution, cameraSettings.fps]);
+  }, [cameraSettings.facingMode, cameraSettings.resolution]);
 
   // Combined CSS filter string
   const cssFilterValue = getCombinedFilterStyle(activeFilter, filterAdjustments);
@@ -220,37 +256,56 @@ export const CameraView: React.FC<CameraViewProps> = ({
     bottom: 'bottom-20 sm:bottom-24',
   };
 
+  // Touch on screen plays video if paused by iOS
+  const handleViewportClick = () => {
+    if (videoRef.current && stream && videoRef.current.paused) {
+      videoRef.current
+        .play()
+        .then(() => setIsVideoPlaying(true))
+        .catch(() => {});
+    }
+  };
+
   return (
     <div
       id="camera-viewport-container"
       ref={containerRef}
+      onClick={handleViewportClick}
       className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
     >
-      {/* Video Feed */}
-      {hasPermission && !cameraError ? (
-        <div
-          className="relative w-full h-full overflow-hidden flex items-center justify-center transition-transform duration-200"
+      {/* Permanent Video Element in DOM so ref and srcObject are NEVER null */}
+      <div
+        className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center transition-transform duration-200"
+        style={{
+          transform: `scale(${cameraSettings.zoom})`,
+        }}
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          // @ts-ignore
+          webkit-playsinline="true"
+          muted
+          className={`w-full h-full object-cover transition-opacity duration-300 ${
+            cameraSettings.facingMode === 'user' ? 'scale-x-[-1]' : ''
+          } ${isVideoPlaying ? 'opacity-100' : 'opacity-0'}`}
           style={{
-            transform: `scale(${cameraSettings.zoom})`,
+            filter: cssFilterValue,
           }}
-        >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`w-full h-full object-cover pointer-events-none transition-[filter] duration-200 ${
-              cameraSettings.facingMode === 'user' ? 'scale-x-[-1]' : ''
-            }`}
-            style={{
-              filter: cssFilterValue,
-            }}
-          />
-        </div>
-      ) : (
-        /* Fallback Simulation Canvas when camera is blocked/pending */
+          onPlay={() => setIsVideoPlaying(true)}
+          onPlaying={() => setIsVideoPlaying(true)}
+          onCanPlay={() => {
+            setIsVideoPlaying(true);
+            videoRef.current?.play().catch(() => {});
+          }}
+        />
+      </div>
+
+      {/* Fallback Simulation Canvas when camera is blocked/pending/initializing */}
+      {!isVideoPlaying && (
         <div
-          className="relative w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-[#181824] via-[#0d0d14] to-[#050508] p-6 text-center"
+          className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-[#181824] via-[#0d0d14] to-[#050508] p-6 text-center z-10"
           style={{
             filter: cssFilterValue,
           }}
@@ -259,31 +314,51 @@ export const CameraView: React.FC<CameraViewProps> = ({
           <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_50%_40%,rgba(245,158,11,0.25),transparent_60%)]" />
           <div className="absolute inset-0 opacity-15 bg-[radial-gradient(circle_at_20%_80%,rgba(56,239,125,0.2),transparent_50%)]" />
 
-          <div className="relative z-10 flex flex-col items-center max-w-xs gap-3 p-5 rounded-2xl bg-black/75 backdrop-blur-md border border-white/15 shadow-2xl text-center">
+          <div className="relative z-10 flex flex-col items-center max-w-xs gap-3 p-5 rounded-2xl bg-black/80 backdrop-blur-md border border-white/15 shadow-2xl text-center">
             <div className="w-12 h-12 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shadow-inner">
               <CameraOff className="w-6 h-6" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-white">Visualização da Câmera</h3>
               <p className="text-xs text-zinc-300 mt-1">
-                {cameraError
-                  ? 'O acesso à câmera precisa ser autorizado no seu iPhone ou navegador.'
+                {stream
+                  ? 'Câmera conectada! Toque no botão abaixo para desbloquear o vídeo no iPhone.'
+                  : cameraError
+                  ? 'Permissão negada ou restrita nos Ajustes do iPhone.'
                   : 'Iniciando sensor de vídeo...'}
               </p>
             </div>
 
-            {/* Primary Action Button (User Gesture for iOS) */}
+            {/* Primary Action Button */}
             <button
               type="button"
               id="btn-retry-camera"
               disabled={isAttempting}
-              onClick={initCamera}
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (stream && videoRef.current) {
+                  try {
+                    videoRef.current.srcObject = stream;
+                    await videoRef.current.play();
+                    setIsVideoPlaying(true);
+                    return;
+                  } catch (playErr) {
+                    console.warn('Play error:', playErr);
+                  }
+                }
+                initCamera();
+              }}
               className="w-full mt-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black text-xs font-extrabold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 disabled:opacity-50"
             >
               {isAttempting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
                   <span>Conectando...</span>
+                </>
+              ) : stream ? (
+                <>
+                  <Play className="w-4 h-4 fill-black" />
+                  <span>Desbloquear Vídeo no iPhone</span>
                 </>
               ) : (
                 <>
@@ -296,7 +371,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
             {/* iPhone / iOS Guide Button */}
             <button
               type="button"
-              onClick={() => setIsIOSGuideOpen(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsIOSGuideOpen(true);
+              }}
               className="w-full py-2 px-3 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition border border-white/10"
             >
               <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
@@ -348,8 +426,8 @@ export const CameraView: React.FC<CameraViewProps> = ({
           <div className="border-r border-b border-white/20" />
           <div className="border-r border-b border-white/20" />
           <div className="border-b border-white/20" />
-          <div className="border-r border-white/20" />
-          <div className="border-r border-white/20" />
+          <div className="border-r border-b border-white/20" />
+          <div className="border-r border-b border-white/20" />
           <div />
         </div>
       )}

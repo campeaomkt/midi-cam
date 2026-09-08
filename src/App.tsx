@@ -30,8 +30,8 @@ export default function App() {
   // Camera Configuration State
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>({
     facingMode: 'environment',
-    resolution: '4K',
-    fps: 24,
+    resolution: '1080P',
+    fps: 30,
     zoom: 1,
     gridEnabled: false,
     micEnabled: true,
