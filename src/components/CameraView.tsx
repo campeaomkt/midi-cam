@@ -3,7 +3,8 @@ import { CameraSettings, FilterPreset, KeyboardSettings, DetectedChord } from '.
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { ChordDisplay } from './ChordDisplay';
 import { getCombinedFilterStyle } from '../utils/filterPresets';
-import { CameraOff, Camera } from 'lucide-react';
+import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone } from 'lucide-react';
+import { IOSPermissionGuideModal } from './IOSPermissionGuideModal';
 
 interface CameraViewProps {
   cameraSettings: CameraSettings;
@@ -45,64 +46,157 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean>(false);
+  const [isIOSGuideOpen, setIsIOSGuideOpen] = useState<boolean>(false);
+  const [isAttempting, setIsAttempting] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize Camera
+  // Detect iOS environment
+  const isIOS =
+    typeof navigator !== 'undefined' &&
+    (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+  // Initialize Camera with robust progressive fallback for iOS Safari and PWA
   const initCamera = useCallback(async () => {
+    setIsAttempting(true);
+    setCameraError(null);
+
+    // Stop existing tracks if any
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError('Câmera não é suportada diretamente neste navegador.');
+      setIsAttempting(false);
+      return;
+    }
+
+    let mediaStream: MediaStream | null = null;
+    let lastErrorMsg = '';
+
+    // Step 1: Ideal constraints (with audio if requested)
     try {
-      setCameraError(null);
-
-      // Stop existing tracks if any
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraError('Câmera não é suportada diretamente neste navegador.');
-        return;
-      }
-
-      // Constraints based on settings
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: cameraSettings.facingMode,
-          width: { ideal: cameraSettings.resolution === '4K' ? 3840 : cameraSettings.resolution === '1080P' ? 1920 : 1280 },
-          height: { ideal: cameraSettings.resolution === '4K' ? 2160 : cameraSettings.resolution === '1080P' ? 1080 : 720 },
+          width: {
+            ideal:
+              cameraSettings.resolution === '4K'
+                ? 3840
+                : cameraSettings.resolution === '1080P'
+                ? 1920
+                : 1280,
+          },
+          height: {
+            ideal:
+              cameraSettings.resolution === '4K'
+                ? 2160
+                : cameraSettings.resolution === '1080P'
+                ? 1080
+                : 720,
+          },
           frameRate: { ideal: cameraSettings.fps },
         },
         audio: cameraSettings.micEnabled,
       };
+      mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err1: any) {
+      lastErrorMsg = err1?.message || 'Falha ao solicitar resolução ideal';
+      console.warn('Strategy 1 failed, trying video-only without audio...', err1);
+    }
 
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(mediaStream);
-      setHasPermission(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+    // Step 2: Video-only fallback (critical on iOS when mic is restricted or conflicting)
+    if (!mediaStream) {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: cameraSettings.facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        };
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err2: any) {
+        lastErrorMsg = err2?.message || 'Falha em 720p';
+        console.warn('Strategy 2 failed, trying simplified facingMode...', err2);
       }
+    }
 
-      // Hardware torch attempt
-      const videoTrack = mediaStream.getVideoTracks()[0];
-      if (videoTrack && 'getCapabilities' in videoTrack) {
-        const capabilities = videoTrack.getCapabilities() as unknown as { torch?: boolean };
-        if (capabilities.torch && cameraSettings.flashEnabled) {
-          try {
-            await videoTrack.applyConstraints({
-              // @ts-expect-error torch is valid in mobile browsers
-              advanced: [{ torch: cameraSettings.flashEnabled }],
-            });
-          } catch {
-            // torch constraint failed or unsupported
-          }
+    // Step 3: Pure facingMode constraint (standard for mobile Safari)
+    if (!mediaStream) {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: cameraSettings.facingMode },
+          audio: false,
+        });
+      } catch (err3: any) {
+        lastErrorMsg = err3?.message || 'Falha em facingMode';
+        console.warn('Strategy 3 failed, trying simple video: true...', err3);
+      }
+    }
+
+    // Step 4: Generic video fallback
+    if (!mediaStream) {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      } catch (err4: any) {
+        lastErrorMsg = err4?.message || 'Permissão de câmera negada ou indisponível';
+        console.warn('Strategy 4 failed:', err4);
+      }
+    }
+
+    setIsAttempting(false);
+
+    if (!mediaStream) {
+      setCameraError(lastErrorMsg || 'Não foi possível acessar o sensor da câmera.');
+      setHasPermission(false);
+      return;
+    }
+
+    setStream(mediaStream);
+    setHasPermission(true);
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = mediaStream;
+      videoRef.current.setAttribute('playsinline', 'true');
+      videoRef.current.setAttribute('webkit-playsinline', 'true');
+      videoRef.current.muted = true;
+      try {
+        await videoRef.current.play();
+      } catch (playErr) {
+        console.log('Video play caught on iOS:', playErr);
+      }
+    }
+
+    // Hardware torch attempt
+    const videoTrack = mediaStream.getVideoTracks()[0];
+    if (videoTrack && 'getCapabilities' in videoTrack) {
+      const capabilities = videoTrack.getCapabilities() as unknown as { torch?: boolean };
+      if (capabilities.torch && cameraSettings.flashEnabled) {
+        try {
+          await videoTrack.applyConstraints({
+            // @ts-expect-error torch is valid in mobile browsers
+            advanced: [{ torch: cameraSettings.flashEnabled }],
+          });
+        } catch {
+          // torch constraint failed or unsupported
         }
       }
-    } catch (err: unknown) {
-      console.warn('Camera access issue:', err);
-      const msg = err instanceof Error ? err.message : 'Permissão da câmera necessária';
-      setCameraError(msg);
-      setHasPermission(false);
     }
-  }, [cameraSettings.facingMode, cameraSettings.resolution, cameraSettings.fps, cameraSettings.micEnabled, cameraSettings.flashEnabled, videoRef]);
+  }, [
+    cameraSettings.facingMode,
+    cameraSettings.resolution,
+    cameraSettings.fps,
+    cameraSettings.micEnabled,
+    cameraSettings.flashEnabled,
+    videoRef,
+    stream,
+  ]);
 
   useEffect(() => {
     initCamera();
@@ -165,30 +259,59 @@ export const CameraView: React.FC<CameraViewProps> = ({
           <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_50%_40%,rgba(245,158,11,0.25),transparent_60%)]" />
           <div className="absolute inset-0 opacity-15 bg-[radial-gradient(circle_at_20%_80%,rgba(56,239,125,0.2),transparent_50%)]" />
 
-          <div className="relative z-10 flex flex-col items-center max-w-xs gap-3 p-5 rounded-2xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl">
-            <div className="w-12 h-12 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center">
+          <div className="relative z-10 flex flex-col items-center max-w-xs gap-3 p-5 rounded-2xl bg-black/75 backdrop-blur-md border border-white/15 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-400/20 text-amber-400 flex items-center justify-center shadow-inner">
               <CameraOff className="w-6 h-6" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-white">Visualização da Câmera</h3>
-              <p className="text-xs text-zinc-400 mt-1">
+              <p className="text-xs text-zinc-300 mt-1">
                 {cameraError
-                  ? 'Permita o acesso à câmera no navegador ou continue tocando no teclado interativo abaixo.'
+                  ? 'O acesso à câmera precisa ser autorizado no seu iPhone ou navegador.'
                   : 'Iniciando sensor de vídeo...'}
               </p>
             </div>
+
+            {/* Primary Action Button (User Gesture for iOS) */}
             <button
               type="button"
               id="btn-retry-camera"
+              disabled={isAttempting}
               onClick={initCamera}
-              className="mt-1 px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+              className="w-full mt-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black text-xs font-extrabold transition flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95 disabled:opacity-50"
             >
-              <Camera className="w-4 h-4" />
-              <span>Ativar Câmera</span>
+              {isAttempting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Conectando...</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-4 h-4 stroke-[2.5]" />
+                  <span>Tocar para Iniciar Câmera</span>
+                </>
+              )}
+            </button>
+
+            {/* iPhone / iOS Guide Button */}
+            <button
+              type="button"
+              onClick={() => setIsIOSGuideOpen(true)}
+              className="w-full py-2 px-3 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition border border-white/10"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+              <span>Como ativar no iPhone (iOS)</span>
             </button>
           </div>
         </div>
       )}
+
+      {/* iOS Camera & Gallery Permission Guide Modal */}
+      <IOSPermissionGuideModal
+        isOpen={isIOSGuideOpen}
+        onClose={() => setIsIOSGuideOpen(false)}
+        onRetryCamera={initCamera}
+      />
 
       {/* Real-time Color Tint Overlay (from film preset) */}
       {activeFilter.colorGrading.tintColor && (

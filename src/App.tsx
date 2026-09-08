@@ -12,6 +12,11 @@ import { detectChord } from './utils/chordDetector';
 import { audioSynth } from './utils/audioSynth';
 import { midiManager } from './utils/midiManager';
 import { videoRecorder } from './utils/videoRecorder';
+import {
+  saveRecordingToStorage,
+  loadRecordingsFromStorage,
+  deleteRecordingFromStorage,
+} from './utils/recordingStorage';
 import { CameraView } from './components/CameraView';
 import { TopHudBar } from './components/TopHudBar';
 import { BottomControls } from './components/BottomControls';
@@ -209,8 +214,9 @@ export default function App() {
         setRecordingSeconds(secs);
       });
 
-      videoRecorder.setCompletionListener((newRec) => {
+      videoRecorder.setCompletionListener(async (newRec) => {
         setRecordings((prev) => [newRec, ...prev]);
+        await saveRecordingToStorage(newRec);
         setIsGalleryOpen(true);
       });
 
@@ -228,9 +234,69 @@ export default function App() {
     }
   };
 
-  const handleDeleteRecording = (id: string) => {
+  const handleDeleteRecording = async (id: string) => {
     setRecordings((prev) => prev.filter((r) => r.id !== id));
+    await deleteRecordingFromStorage(id);
   };
+
+  // Import media (video or photo) selected directly from iPhone Gallery / Photos
+  const handleImportMedia = async (file: File) => {
+    const url = URL.createObjectURL(file);
+    let thumbnailUrl = '';
+    let duration = 0;
+
+    if (file.type.startsWith('image/')) {
+      thumbnailUrl = url;
+      duration = 1;
+    } else if (file.type.startsWith('video/')) {
+      try {
+        const tempVid = document.createElement('video');
+        tempVid.src = url;
+        tempVid.muted = true;
+        tempVid.setAttribute('playsinline', 'true');
+        await new Promise((resolve) => {
+          tempVid.onloadeddata = resolve;
+          tempVid.onerror = resolve;
+          setTimeout(resolve, 1200);
+        });
+        duration = Math.round(tempVid.duration || 5);
+        const c = document.createElement('canvas');
+        c.width = tempVid.videoWidth || 320;
+        c.height = tempVid.videoHeight || 180;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(tempVid, 0, 0, c.width, c.height);
+          thumbnailUrl = c.toDataURL('image/jpeg', 0.7);
+        }
+      } catch {
+        thumbnailUrl = '';
+      }
+    }
+
+    const newRec: VideoRecording = {
+      id: `gallery-${Date.now()}`,
+      url,
+      blob: file,
+      duration,
+      timestamp: Date.now(),
+      thumbnailUrl,
+      sizeBytes: file.size,
+      filterName: file.name.slice(0, 20),
+    };
+
+    setRecordings((prev) => [newRec, ...prev]);
+    await saveRecordingToStorage(newRec);
+    setIsGalleryOpen(true);
+  };
+
+  // Load persistent recordings on mount
+  useEffect(() => {
+    loadRecordingsFromStorage().then((saved) => {
+      if (saved && saved.length > 0) {
+        setRecordings(saved);
+      }
+    });
+  }, []);
 
   const handleResetFilterAdjustments = () => {
     setFilterAdjustments({
@@ -353,6 +419,7 @@ export default function App() {
         onClose={() => setIsGalleryOpen(false)}
         recordings={recordings}
         onDeleteRecording={handleDeleteRecording}
+        onImportMedia={handleImportMedia}
       />
     </div>
   );

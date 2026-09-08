@@ -188,16 +188,30 @@ export class VideoRecorderManager {
       const combinedTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks(), ...audioTracks];
       const combinedStream = new MediaStream(combinedTracks);
 
-      // Select supported mime type
-      const mimeTypes = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm',
-        'video/mp4',
-      ];
+      // Select supported mime type (prioritize MP4 on iOS so it can be saved directly to the iPhone Photos Camera Roll)
+      const isIOS =
+        typeof navigator !== 'undefined' &&
+        (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+      const mimeTypes = isIOS
+        ? [
+            'video/mp4;codecs=avc1',
+            'video/mp4',
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm',
+          ]
+        : [
+            'video/mp4;codecs=avc1',
+            'video/mp4',
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm',
+          ];
       let selectedMime = '';
       for (const mime of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mime)) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mime)) {
           selectedMime = mime;
           break;
         }

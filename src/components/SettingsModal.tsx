@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useId, useState } from 'react';
 import { CameraSettings, KeyboardSettings, KeyCount, MidiDevice } from '../types';
 import {
   X,
@@ -15,9 +15,12 @@ import {
   RotateCcw,
   Check,
   Sparkles,
+  Smartphone,
+  HelpCircle,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
 import { PWAInstallButton } from './PWAInstallButton';
+import { IOSPermissionGuideModal } from './IOSPermissionGuideModal';
 import {
   KEYBOARD_COLOR_PALETTE,
   getEffectiveActiveColor,
@@ -47,6 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateKeyboard,
 }) => {
   const colorInputId = useId();
+  const [isIOSGuideOpen, setIsIOSGuideOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -601,9 +605,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
-        {/* Section 5: PWA Install App for Android & iOS */}
+        {/* Section 5: PWA Install App & iOS Permissions */}
         <div className="flex flex-col gap-2">
           <PWAInstallButton variant="settings-item" />
+
+          {/* iPhone Permissions Helper */}
+          <button
+            type="button"
+            onClick={() => setIsIOSGuideOpen(true)}
+            className="w-full p-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-800 border border-white/10 flex items-center justify-between text-left transition cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0">
+                <Smartphone className="w-4 h-4" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-white">Permissões no iPhone (Câmera & Galeria)</span>
+                <span className="text-[10px] text-zinc-400">Ver como autorizar nos Ajustes do iOS</span>
+              </div>
+            </div>
+            <HelpCircle className="w-4 h-4 text-zinc-400" />
+          </button>
         </div>
 
         {/* Footer info & Close */}
@@ -618,6 +640,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         >
           Fechar
         </button>
+
+        {/* iOS Permissions Guide Modal */}
+        <IOSPermissionGuideModal
+          isOpen={isIOSGuideOpen}
+          onClose={() => setIsIOSGuideOpen(false)}
+          onRetryCamera={() => {
+            setIsIOSGuideOpen(false);
+            onClose();
+          }}
+        />
       </div>
     </div>
   );
