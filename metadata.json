@@ -1,0 +1,11 @@
+{
+  "name": "MIDI Camera & Chord Recorder",
+  "description": "Camera app with real-time video filters, connected MIDI keyboard overlay, and live chord detection.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

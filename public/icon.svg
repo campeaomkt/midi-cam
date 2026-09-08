@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141418" />
+      <stop offset="100%" stop-color="#070709" />
+    </linearGradient>
+    <linearGradient id="pianoGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3bf5b0" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <radialGradient id="lens" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#2a2b36" />
+      <stop offset="70%" stop-color="#12131a" />
+      <stop offset="100%" stop-color="#090a0f" />
+    </radialGradient>
+    <linearGradient id="amberGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded rectangle -->
+  <rect width="512" height="512" rx="110" fill="url(#bg)" />
+  <rect width="508" height="508" x="2" y="2" rx="108" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3" />
+
+  <!-- Camera Outer Ring / Viewfinder -->
+  <circle cx="256" cy="200" r="130" fill="url(#lens)" stroke="#222430" stroke-width="6" />
+  <circle cx="256" cy="200" r="95" fill="none" stroke="#3bf5b0" stroke-width="3" stroke-dasharray="14 10" opacity="0.6" />
+  <circle cx="256" cy="200" r="60" fill="#0d0e14" stroke="#2b2d3d" stroke-width="4" />
+  <circle cx="270" cy="186" r="16" fill="rgba(255,255,255,0.25)" />
+
+  <!-- Recording Red Dot -->
+  <circle cx="345" cy="115" r="14" fill="#ef4444" filter="url(#glow)" />
+  <circle cx="345" cy="115" r="9" fill="#f87171" />
+
+  <!-- Chord Badge "C" -->
+  <rect x="220" y="80" width="72" height="40" rx="8" fill="#000000" stroke="#3bf5b0" stroke-width="2" />
+  <text x="256" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="24" font-weight="900" fill="#ffffff" text-anchor="middle">C</text>
+
+  <!-- Piano Keyboard Section -->
+  <g transform="translate(64, 320)">
+    <!-- Keyboard base plate -->
+    <rect x="-6" y="-6" width="396" height="132" rx="14" fill="#0a0a0d" stroke="rgba(255,255,255,0.12)" stroke-width="3" />
+
+    <!-- White Keys (7 keys) -->
+    <!-- Key 1 -->
+    <rect x="0" y="0" width="54" height="120" rx="4" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5" />
+    <!-- Key 2 -->
+    <rect x="55" y="0" width="54" height="120" rx="4" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5" />
+    <!-- Key 3 (ACTIVE - glowing cyan) -->
+    <rect x="110" y="0" width="54" height="120" rx="4" fill="url(#pianoGlow)" stroke="#3bf5b0" stroke-width="1.5" filter="url(#glow)" />
+    <!-- Key 4 -->
+    <rect x="165" y="0" width="54" height="120" rx="4" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5" />
+    <!-- Key 5 (ACTIVE - glowing cyan) -->
+    <rect x="220" y="0" width="54" height="120" rx="4" fill="url(#pianoGlow)" stroke="#3bf5b0" stroke-width="1.5" filter="url(#glow)" />
+    <!-- Key 6 -->
+    <rect x="275" y="0" width="54" height="120" rx="4" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5" />
+    <!-- Key 7 (ACTIVE - glowing cyan) -->
+    <rect x="330" y="0" width="54" height="120" rx="4" fill="url(#pianoGlow)" stroke="#3bf5b0" stroke-width="1.5" filter="url(#glow)" />
+
+    <!-- Black Keys -->
+    <rect x="36" y="0" width="34" height="74" rx="3" fill="#18181b" stroke="#000000" stroke-width="1" />
+    <rect x="91" y="0" width="34" height="74" rx="3" fill="#18181b" stroke="#000000" stroke-width="1" />
+    <rect x="201" y="0" width="34" height="74" rx="3" fill="#18181b" stroke="#000000" stroke-width="1" />
+    <rect x="256" y="0" width="34" height="74" rx="3" fill="#18181b" stroke="#000000" stroke-width="1" />
+    <rect x="311" y="0" width="34" height="74" rx="3" fill="#18181b" stroke="#000000" stroke-width="1" />
+  </g>
+</svg>
