@@ -334,17 +334,6 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     };
   }, [effectiveKeyCount, octaveShift]);
 
-  // Auto-scroll when active notes are outside viewport in scroll mode
-  useEffect(() => {
-    if (viewMode === 'scroll' && activeNotes.length > 0 && scrollContainerRef.current) {
-      const firstActive = activeNotes[0];
-      const keyElem = document.getElementById(`piano-key-white-${firstActive}`) || document.getElementById(`piano-key-black-${firstActive}`);
-      if (keyElem) {
-        keyElem.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-      }
-    }
-  }, [activeNotes, viewMode]);
-
   // Touch & Mouse event handlers
   const handleTouchStart = (midi: number) => {
     touchActiveNotes.current.add(midi);
@@ -359,9 +348,6 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   // Black key width is exactly 60% of a white key width
   const blackWidthPercent = (1 / totalWhiteKeys) * 60;
 
-  // Decide if scroll container width is expanded
-  const isLargeKeyboard = effectiveKeyCount >= 61;
-  const isScrollActive = isLargeKeyboard && viewMode === 'scroll';
   const heightClass = getKeyboardHeightClass(effectiveKeyCount, viewMode, heightPreset);
   const noteLabelSize = effectiveKeyCount >= 61 
     ? 'text-[6.5px] sm:text-[7.5px] md:text-[9.5px] lg:text-[10.5px]' 
@@ -378,20 +364,16 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       data-active-color={effectiveColor}
       data-active-dark-color={darkerColor}
       data-glow-intensity={glowIntensity}
-      className="relative w-[95%] sm:w-[92%] md:w-[94%] max-w-5xl mx-auto flex flex-col select-none"
+      className="relative w-[95%] sm:w-[92%] md:w-[94%] max-w-5xl mx-auto flex flex-col select-none touch-none"
     >
-      {/* Main Piano Keyboard with subtle soft shadow and crisp straight edges matching screenshot */}
+      {/* Main Piano Keyboard with static layout, crisp straight edges and zero touch shifting */}
       <div
         ref={scrollContainerRef}
-        className={`relative w-full ${heightClass} rounded-none overflow-x-auto no-scrollbar shadow-[0_8px_24px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.25)] bg-white border border-neutral-300`}
+        className={`relative w-full ${heightClass} rounded-none overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.25)] bg-white border border-neutral-300 touch-none select-none`}
       >
-        <div
-          className={`relative h-full flex ${
-            isScrollActive ? 'min-w-[720px] sm:min-w-[860px]' : 'w-full'
-          }`}
-        >
+        <div className="relative h-full w-full flex touch-none">
           {/* White Keys */}
-          <div className="relative w-full h-full flex">
+          <div className="relative w-full h-full flex touch-none">
             {whiteKeys.map((key) => {
               const isActive = activeSet.has(key.midi);
               return (
@@ -399,8 +381,9 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                   key={key.midi}
                   id={`piano-key-white-${key.midi}`}
                   type="button"
+                  tabIndex={-1}
                   style={isActive ? activeWhiteStyle : undefined}
-                  className={`relative flex-1 h-full rounded-none border-r last:border-r-0 border-neutral-300 transition-colors duration-75 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none ${
+                  className={`relative flex-1 h-full rounded-none border-r last:border-r-0 border-neutral-300 transition-colors duration-75 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none touch-none outline-none ${
                     isActive
                       ? 'z-10 shadow-inner'
                       : 'bg-white hover:bg-neutral-50 active:bg-neutral-100'
@@ -416,10 +399,18 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                     e.preventDefault();
                     handleTouchStart(key.midi);
                   }}
+                  onTouchMove={(e) => {
+                    e.preventDefault();
+                  }}
                   onTouchEnd={(e) => {
                     e.preventDefault();
                     handleTouchEnd(key.midi);
                   }}
+                  onTouchCancel={(e) => {
+                    e.preventDefault();
+                    handleTouchEnd(key.midi);
+                  }}
+                  onContextMenu={(e) => e.preventDefault()}
                 >
                   {/* Subtle top edge gloss line */}
                   <div className="absolute top-0 inset-x-0 h-0.5 bg-neutral-200/50 pointer-events-none" />
@@ -450,12 +441,13 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 key={key.midi}
                 id={`piano-key-black-${key.midi}`}
                 type="button"
+                tabIndex={-1}
                 style={{
                   left: `${key.blackPositionPercent}%`,
                   width: `${blackWidthPercent}%`,
                   ...(isActive ? activeBlackStyle : {}),
                 }}
-                className={`absolute top-0 h-[62%] -translate-x-1/2 rounded-none transition-colors duration-75 z-20 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none ${
+                className={`absolute top-0 h-[62%] -translate-x-1/2 rounded-none transition-colors duration-75 z-20 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none touch-none outline-none ${
                   isActive
                     ? 'shadow-inner'
                     : 'bg-[#18181b] shadow-[0_1px_3px_rgba(0,0,0,0.5)] hover:bg-[#27272a]'
@@ -471,10 +463,18 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                   e.preventDefault();
                   handleTouchStart(key.midi);
                 }}
+                onTouchMove={(e) => {
+                  e.preventDefault();
+                }}
                 onTouchEnd={(e) => {
                   e.preventDefault();
                   handleTouchEnd(key.midi);
                 }}
+                onTouchCancel={(e) => {
+                  e.preventDefault();
+                  handleTouchEnd(key.midi);
+                }}
+                onContextMenu={(e) => e.preventDefault()}
               >
                 {/* 3D top sheen */}
                 <div className="absolute inset-x-0.5 top-0 h-[82%] bg-white/[0.06] rounded-none pointer-events-none" />

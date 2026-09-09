@@ -181,6 +181,18 @@ export default function App() {
     return detectChord(activeNotes);
   }, [activeNotes]);
 
+  // Keep live references for video recorder animation loop without triggering re-renders
+  const activeNotesRef = useRef<number[]>([]);
+  const currentChordRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeNotesRef.current = activeNotes;
+  }, [activeNotes]);
+
+  useEffect(() => {
+    currentChordRef.current = currentChord ? currentChord.name : null;
+  }, [currentChord]);
+
   // Maintain last detected chord when keys are briefly lifted
   useEffect(() => {
     if (currentChord && currentChord.isKnown) {
@@ -325,13 +337,14 @@ export default function App() {
         setIsGalleryOpen(true);
       });
 
-      const started = videoRecorder.startRecording(
-        videoRef.current,
-        filterCss,
-        keyboardElem,
-        currentChord ? currentChord.name : null,
-        audioTracks
-      );
+      const started = videoRecorder.startRecording({
+        videoElement: videoRef.current,
+        filterString: filterCss,
+        keyboardElement: keyboardElem,
+        getChord: () => currentChordRef.current,
+        getNotes: () => activeNotesRef.current,
+        audioTracks,
+      });
 
       if (started) {
         setIsRecording(true);
