@@ -148,17 +148,20 @@ class AudioSynthManager {
   }
 
   public stopNote(midiNumber: number) {
-    // 1. Release SF2 sample voice if loaded
+    // 1. Release in TimbreEngine (which handles built-in sampled soundfonts and custom SF2)
+    timbreEngine.stopNote(midiNumber);
+
+    // 2. Release SF2 sample voice if loaded directly
     if (sf2Engine.getIsLoaded()) {
       sf2Engine.stopNote(midiNumber, this.ctx || undefined);
     }
 
-    // 2. Release synth voice if sounding
+    // 3. Release synth voice if sounding
     const voice = this.activeVoices.get(midiNumber);
     if (!voice || !this.ctx) return;
 
     const now = this.ctx.currentTime;
-    const release = 0.35;
+    const release = 0.25;
 
     // Smooth release fade out
     voice.gain.gain.cancelScheduledValues(now);
@@ -181,6 +184,7 @@ class AudioSynthManager {
   }
 
   public stopAllNotes() {
+    timbreEngine.stopAllNotes();
     if (sf2Engine.getIsLoaded()) {
       sf2Engine.stopAllVoices();
     }

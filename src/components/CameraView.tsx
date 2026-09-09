@@ -23,6 +23,7 @@ interface CameraViewProps {
   chordColor: string;
   chordFontSize: 'medium' | 'large' | 'huge';
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  isSustainActive?: boolean;
   onNotePlay: (midi: number) => void;
   onNoteRelease: (midi: number) => void;
   onUpdateKeyboard?: (settings: Partial<KeyboardSettings>) => void;
@@ -39,6 +40,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   chordColor,
   chordFontSize,
   videoRef,
+  isSustainActive = false,
   onNotePlay,
   onNoteRelease,
   onUpdateKeyboard,
@@ -441,12 +443,18 @@ export const CameraView: React.FC<CameraViewProps> = ({
           }`}
         >
           {/* Real-time Detected Chord Display (appears only when keys are pressed) */}
-          <div className="w-full flex justify-center mb-1 sm:mb-2 min-h-[48px] items-center">
+          <div className="w-full flex justify-center mb-1 sm:mb-2 min-h-[48px] items-center relative">
             <ChordDisplay
               chord={currentChord}
               fontSize={chordFontSize}
               color={chordColor}
             />
+            {isSustainActive && (
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 px-2.5 py-0.5 rounded-full bg-amber-500/25 border border-amber-400/50 text-amber-300 text-[10.5px] font-extrabold tracking-wider flex items-center gap-1.5 shadow-[0_0_10px_rgba(245,158,11,0.4)] backdrop-blur-md animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span>PEDAL</span>
+              </div>
+            )}
           </div>
 
           {/* Virtual Keyboard with crisp straight edges and soft shadow */}

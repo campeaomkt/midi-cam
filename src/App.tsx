@@ -83,6 +83,7 @@ export default function App() {
   // MIDI Devices State
   const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
   const [isMidiConnected, setIsMidiConnected] = useState<boolean>(false);
+  const [isSustainActive, setIsSustainActive] = useState<boolean>(false);
 
   // Recording State
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -168,7 +169,7 @@ export default function App() {
     audioSynth.setMuted(!keyboardSettings.soundEnabled);
   }, [keyboardSettings.synthVolume, keyboardSettings.soundEnabled]);
 
-  // Setup MIDI Listeners
+  // Setup MIDI & Sustain Listeners
   useEffect(() => {
     const unsubNoteOn = midiManager.onNoteOn((note, velocity) => {
       setActiveNotes((prev) => (prev.includes(note) ? prev : [...prev, note]));
@@ -182,6 +183,10 @@ export default function App() {
       if (keyboardSettings.soundEnabled) {
         audioSynth.stopNote(note);
       }
+    });
+
+    const unsubSustain = midiManager.onSustainChange((active) => {
+      setIsSustainActive(active);
     });
 
     const unsubDevices = midiManager.onDevicesChange((devs) => {
@@ -200,31 +205,55 @@ export default function App() {
     return () => {
       unsubNoteOn();
       unsubNoteOff();
+      unsubSustain();
       unsubDevices();
       audioSynth.stopAllNotes();
     };
   }, [keyboardSettings.soundEnabled]);
 
-  // Handle note play from virtual keyboard / touch
-  const handleNotePlay = useCallback(
-    (midi: number) => {
-      setActiveNotes((prev) => (prev.includes(midi) ? prev : [...prev, midi]));
-      if (keyboardSettings.soundEnabled) {
-        audioSynth.startNote(midi, 95);
+  // Support Spacebar on desktop to press/release sustain pedal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.code === 'Space' &&
+        !e.repeat &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        midiManager.setSustain(true);
       }
-    },
-    [keyboardSettings.soundEnabled]
-  );
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (
+        e.code === 'Space' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        midiManager.setSustain(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
-  const handleNoteRelease = useCallback(
-    (midi: number) => {
-      setActiveNotes((prev) => prev.filter((n) => n !== midi));
-      if (keyboardSettings.soundEnabled) {
-        audioSynth.stopNote(midi);
-      }
-    },
-    [keyboardSettings.soundEnabled]
-  );
+  // Handle note play from virtual keyboard / touch
+  const handleNotePlay = useCallback((midi: number) => {
+    midiManager.triggerNoteOn(midi, 95);
+  }, []);
+
+  const handleNoteRelease = useCallback((midi: number) => {
+    midiManager.triggerNoteOff(midi);
+  }, []);
+
+  const handleToggleSustain = useCallback(() => {
+    midiManager.setSustain(!midiManager.getSustainActive());
+  }, []);
 
   // Request MIDI Permission Manually
   const handleRequestMidi = async () => {
@@ -380,6 +409,8 @@ export default function App() {
             midiDevices={midiDevices}
             isMidiConnected={isMidiConnected}
             activeSoundFontName={activeSoundFontName}
+            isSustainActive={isSustainActive}
+            onToggleSustain={handleToggleSustain}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
             onOpenSettings={() => setIsSettingsOpen(true)}
@@ -403,6 +434,7 @@ export default function App() {
             chordColor={chordColor}
             chordFontSize={chordFontSize}
             videoRef={videoRef}
+            isSustainActive={isSustainActive}
             onNotePlay={handleNotePlay}
             onNoteRelease={handleNoteRelease}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}

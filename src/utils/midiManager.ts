@@ -3,6 +3,7 @@ import { MidiDevice } from '../types';
 export type NoteCallback = (midiNumber: number, velocity: number) => void;
 export type NoteOffCallback = (midiNumber: number) => void;
 export type DevicesCallback = (devices: MidiDevice[]) => void;
+export type SustainCallback = (active: boolean) => void;
 
 interface MIDIAccessInstance {
   inputs: Map<string, MIDIInputPort>;
@@ -24,8 +25,10 @@ class MidiManager {
   private noteOnListeners: Set<NoteCallback> = new Set();
   private noteOffListeners: Set<NoteOffCallback> = new Set();
   private devicesListeners: Set<DevicesCallback> = new Set();
+  private sustainListeners: Set<SustainCallback> = new Set();
   private devices: MidiDevice[] = [];
   private sustainActive: boolean = false;
+  private heldKeys: Set<number> = new Set();
   private sustainedNotes: Set<number> = new Set();
 
   constructor() {
@@ -42,6 +45,31 @@ class MidiManager {
 
   public getDevices(): MidiDevice[] {
     return this.devices;
+  }
+
+  public getSustainActive(): boolean {
+    return this.sustainActive;
+  }
+
+  public setSustain(active: boolean) {
+    if (this.sustainActive === active) return;
+    this.sustainActive = active;
+    this.notifySustainListeners(active);
+
+    if (!active) {
+      // Sustain pedal released: Stop all notes that were sustained by the pedal
+      // and are no longer physically held down by fingers
+      const notesToStop: number[] = [];
+      this.sustainedNotes.forEach((note) => {
+        if (!this.heldKeys.has(note)) {
+          notesToStop.push(note);
+        }
+      });
+      this.sustainedNotes.clear();
+      notesToStop.forEach((note) => {
+        this.notifyNoteOff(note);
+      });
+    }
   }
 
   public async requestAccess(): Promise<{ success: boolean; message?: string }> {
@@ -113,7 +141,7 @@ class MidiManager {
     // Command 9 = Note On (if velocity > 0) or Note Off (if velocity === 0)
     if (command === 9) {
       if (velocity > 0) {
-        this.notifyNoteOn(note, velocity);
+        this.handleNoteOn(note, velocity);
       } else {
         this.handleNoteOff(note);
       }
@@ -128,22 +156,23 @@ class MidiManager {
       const ccValue = velocity;
       // CC 64 = Damper/Sustain Pedal
       if (ccNumber === 64) {
-        this.sustainActive = ccValue >= 64;
-        if (!this.sustainActive) {
-          // Release sustained notes
-          this.sustainedNotes.forEach(n => {
-            this.notifyNoteOff(n);
-          });
-          this.sustainedNotes.clear();
-        }
+        this.setSustain(ccValue >= 64);
       }
     }
   }
 
+  private handleNoteOn(note: number, velocity: number) {
+    this.heldKeys.add(note);
+    this.sustainedNotes.delete(note);
+    this.notifyNoteOn(note, velocity);
+  }
+
   private handleNoteOff(note: number) {
+    this.heldKeys.delete(note);
     if (this.sustainActive) {
       this.sustainedNotes.add(note);
     } else {
+      this.sustainedNotes.delete(note);
       this.notifyNoteOff(note);
     }
   }
@@ -164,24 +193,38 @@ class MidiManager {
     return () => this.devicesListeners.delete(cb);
   }
 
+  public onSustainChange(cb: SustainCallback): () => void {
+    this.sustainListeners.add(cb);
+    cb(this.sustainActive);
+    return () => this.sustainListeners.delete(cb);
+  }
+
   public triggerNoteOn(note: number, velocity: number = 100) {
-    this.notifyNoteOn(note, velocity);
+    this.handleNoteOn(note, velocity);
   }
 
   public triggerNoteOff(note: number) {
-    this.notifyNoteOff(note);
+    this.handleNoteOff(note);
   }
 
   private notifyNoteOn(note: number, velocity: number) {
-    this.noteOnListeners.forEach(cb => cb(note, velocity));
+    this.noteOnListeners.forEach((cb) => cb(note, velocity));
   }
 
   private notifyNoteOff(note: number) {
-    this.noteOffListeners.forEach(cb => cb(note));
+    this.noteOffListeners.forEach((cb) => cb(note));
   }
 
   private notifyDevicesListeners() {
-    this.devicesListeners.forEach(cb => cb(this.devices));
+    this.devicesListeners.forEach((cb) => cb(this.devices));
+  }
+
+  private notifySustainListeners(active: boolean) {
+    this.sustainListeners.forEach((cb) => {
+      try {
+        cb(active);
+      } catch {}
+    });
   }
 }
 

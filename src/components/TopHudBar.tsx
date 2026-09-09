@@ -23,6 +23,8 @@ interface TopHudBarProps {
   midiDevices: MidiDevice[];
   isMidiConnected: boolean;
   activeSoundFontName?: string;
+  isSustainActive?: boolean;
+  onToggleSustain?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
   onOpenSettings: () => void;
@@ -38,6 +40,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   midiDevices,
   isMidiConnected,
   activeSoundFontName,
+  isSustainActive = false,
+  onToggleSustain,
   onUpdateCamera,
   onUpdateKeyboard,
   onOpenSettings,
@@ -192,30 +196,48 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           </button>
         </div>
 
-        {/* MIDI Connection Status Badge */}
-        <button
-          type="button"
-          id="btn-midi-status"
-          onClick={onRequestMidi}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium backdrop-blur-md border transition cursor-pointer active:scale-95 ${
-            isMidiConnected
-              ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
-              : 'bg-black/50 border-white/15 text-zinc-300 hover:text-white hover:border-amber-400/40'
-          }`}
-        >
-          <Cable className="w-3.5 h-3.5" />
-          {isMidiConnected ? (
-            <span className="flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              <span>{midiDevices[0]?.name?.slice(0, 14) || 'MIDI Ativo'}</span>
-            </span>
-          ) : (
-            <span className="flex items-center gap-1">
-              <AlertCircle className="w-3 h-3 text-amber-400" />
-              <span>Conectar MIDI</span>
-            </span>
-          )}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Sustain Pedal Indicator & Toggle Button */}
+          <button
+            type="button"
+            id="btn-sustain-pedal"
+            onClick={onToggleSustain}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold backdrop-blur-md border transition cursor-pointer active:scale-95 ${
+              isSustainActive
+                ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
+                : 'bg-black/50 border-white/15 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title={isSustainActive ? 'Pedal Sustain Ativo (CC 64)' : 'Pedal Sustain Desativado (Pressione o pedal físico, Barra de Espaço ou toque aqui)'}
+          >
+            <span className={`w-2 h-2 rounded-full transition-all ${isSustainActive ? 'bg-amber-400 animate-pulse' : 'bg-zinc-600'}`} />
+            <span>{isSustainActive ? 'Pedal ON' : 'Pedal OFF'}</span>
+          </button>
+
+          {/* MIDI Connection Status Badge */}
+          <button
+            type="button"
+            id="btn-midi-status"
+            onClick={onRequestMidi}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium backdrop-blur-md border transition cursor-pointer active:scale-95 ${
+              isMidiConnected
+                ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                : 'bg-black/50 border-white/15 text-zinc-300 hover:text-white hover:border-amber-400/40'
+            }`}
+          >
+            <Cable className="w-3.5 h-3.5" />
+            {isMidiConnected ? (
+              <span className="flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <span>{midiDevices[0]?.name?.slice(0, 14) || 'MIDI Ativo'}</span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <AlertCircle className="w-3 h-3 text-amber-400" />
+                <span>Conectar MIDI</span>
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

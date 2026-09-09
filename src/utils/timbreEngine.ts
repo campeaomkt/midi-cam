@@ -284,6 +284,7 @@ class TimbreEngine {
 
           const node = player.play(noteName, now, {
             gain: Math.pow(normalizedVel, 1.2) * 1.1,
+            release: 0.15,
           });
 
           if (node && typeof node.stop === 'function') {
@@ -308,7 +309,7 @@ class TimbreEngine {
   }
 
   /**
-   * Stop a sounding note
+   * Stop a sounding note promptly (when key is released or pedal is lifted)
    */
   public stopNote(midiNumber: number) {
     if (this.mode === 'custom_sf2') {
@@ -317,13 +318,34 @@ class TimbreEngine {
 
     const active = this.activeNotesMap.get(midiNumber);
     if (active) {
-      if (this.ctx) {
-        active.stop(this.ctx.currentTime + 0.15);
-      } else {
-        active.stop();
-      }
+      try {
+        if (this.ctx) {
+          active.stop(this.ctx.currentTime);
+        } else {
+          active.stop();
+        }
+      } catch {}
       this.activeNotesMap.delete(midiNumber);
     }
+  }
+
+  /**
+   * Silence all sounding voices immediately
+   */
+  public stopAllNotes() {
+    if (this.mode === 'custom_sf2') {
+      sf2Engine.stopAllVoices();
+    }
+    this.activeNotesMap.forEach((active) => {
+      try {
+        if (this.ctx) {
+          active.stop(this.ctx.currentTime);
+        } else {
+          active.stop();
+        }
+      } catch {}
+    });
+    this.activeNotesMap.clear();
   }
 
   /**
