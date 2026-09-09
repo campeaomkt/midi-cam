@@ -15,6 +15,7 @@ export interface StartRecordingOptions {
   getChord?: () => string | null;
   getNotes?: () => number[];
   audioTracks?: MediaStreamTrack[];
+  recordingMode?: 'overlay' | 'direct';
 }
 
 export class VideoRecorderManager {
@@ -58,11 +59,14 @@ export class VideoRecorderManager {
     let getNotes: () => number[] = () => [];
     let audioTracks: MediaStreamTrack[] = [];
 
+    let recordingMode: 'overlay' | 'direct' = 'overlay';
+
     if (optionsOrElement && 'videoElement' in optionsOrElement) {
       const opts = optionsOrElement as StartRecordingOptions;
       videoElement = opts.videoElement;
       filterString = opts.filterString || 'none';
       keyboardElement = opts.keyboardElement || null;
+      recordingMode = opts.recordingMode || 'overlay';
       if (opts.getChord) getChord = opts.getChord;
       if (opts.getNotes) getNotes = opts.getNotes;
       if (opts.audioTracks) audioTracks = opts.audioTracks;
@@ -293,11 +297,22 @@ export class VideoRecorderManager {
         }
       };
 
-      // Get canvas stream (30 fps)
-      const canvasStream = canvas.captureStream(30);
+      // Determine video track source:
+      // If direct mode is enabled, pull directly from raw videoElement.srcObject for 0% CPU overhead!
+      let videoTracksToRecord: MediaStreamTrack[] = [];
+      const isDirectMode = recordingMode === 'direct' && videoElement.srcObject instanceof MediaStream;
+
+      if (isDirectMode) {
+        const rawStream = videoElement.srcObject as MediaStream;
+        videoTracksToRecord = rawStream.getVideoTracks();
+      } else {
+        // Overlay mode: capture rendered composite canvas
+        const canvasStream = canvas.captureStream(30);
+        videoTracksToRecord = canvasStream.getVideoTracks();
+      }
 
       // Create mixed stream with audio
-      const combinedTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks(), ...audioTracks];
+      const combinedTracks: MediaStreamTrack[] = [...videoTracksToRecord, ...audioTracks];
       const combinedStream = new MediaStream(combinedTracks);
 
       // Codec selection: Prioritize hardware-accelerated H.264 / MP4 (supported in Android 10+ Chrome)
@@ -365,8 +380,10 @@ export class VideoRecorderManager {
       this.isRecording = true;
       this.startTime = Date.now();
 
-      // Start animation loop
-      this.animFrameId = requestAnimationFrame(render);
+      // Start animation loop only if overlay composition is needed
+      if (!isDirectMode) {
+        this.animFrameId = requestAnimationFrame(render);
+      }
 
       // Start duration timer
       this.timerInterval = window.setInterval(() => {

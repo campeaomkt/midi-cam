@@ -43,6 +43,7 @@ export default function App() {
     gridEnabled: false,
     micEnabled: true,
     flashEnabled: false,
+    recordingMode: 'overlay',
   });
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
@@ -351,6 +352,7 @@ export default function App() {
         getChord: () => currentChordRef.current,
         getNotes: () => activeNotesRef.current,
         audioTracks,
+        recordingMode: cameraSettings.recordingMode || 'overlay',
       });
 
       if (started) {

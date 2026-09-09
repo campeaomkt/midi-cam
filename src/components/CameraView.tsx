@@ -46,6 +46,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   onUpdateKeyboard,
 }) => {
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
@@ -59,14 +60,15 @@ export const CameraView: React.FC<CameraViewProps> = ({
     (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
-  // Initialize Camera for iOS Safari and PWA (pure video, audio: false to prevent iOS recording pill)
+  // Initialize Camera for Android Chrome, iOS Safari and PWA
   const initCamera = useCallback(async () => {
     setIsAttempting(true);
     setCameraError(null);
 
-    // Stop existing tracks if any
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
+    // Safely stop existing tracks using ref to avoid re-triggering hooks
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -79,7 +81,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
     let lastErrorMsg = '';
 
     // Step 1: Standard mobile constraints with ideal facingMode
-    // CRITICAL: audio is strictly false for preview to prevent iPhone from showing red/orange recording indicators
     try {
       const constraints: MediaStreamConstraints = {
         video: {
@@ -113,7 +114,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
       }
     }
 
-    // Step 3: Pure facingMode constraint (standard for mobile Safari)
+    // Step 3: Pure facingMode constraint (standard for mobile Safari / Chrome)
     if (!mediaStream) {
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -148,6 +149,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
       return;
     }
 
+    streamRef.current = mediaStream;
     setStream(mediaStream);
     setHasPermission(true);
 
@@ -189,7 +191,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
     cameraSettings.resolution,
     cameraSettings.flashEnabled,
     videoRef,
-    stream,
   ]);
 
   // Dedicated effect ensuring stream is ALWAYS attached to videoRef and played
@@ -220,7 +221,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
           setCameraError(null);
         })
         .catch((err) => {
-          console.log('Autoplay blocked by iOS until user interaction:', err);
+          console.log('Autoplay blocked by browser until user interaction:', err);
         });
     };
 
@@ -240,11 +241,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
     initCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
-  }, [cameraSettings.facingMode, cameraSettings.resolution]);
+  }, [initCamera]);
 
   // Combined CSS filter string
   const cssFilterValue = getCombinedFilterStyle(activeFilter, filterAdjustments);

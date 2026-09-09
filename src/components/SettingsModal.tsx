@@ -195,6 +195,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
+              <Piano className="w-5 h-5 text-amber-400" />
+              <div>
+                <h4 className="text-sm font-bold">Exibir Teclado Virtual</h4>
+                <p className="text-xs text-zinc-400">Ativa a sobreposição das teclas na tela e na gravação</p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="btn-toggle-keyboard-visible"
+              onClick={() => onUpdateKeyboard({ visible: !keyboardSettings.visible })}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                keyboardSettings.visible
+                  ? 'bg-amber-400 text-black border-amber-300 shadow-md'
+                  : 'bg-zinc-800 text-zinc-400 border-white/10 hover:text-white'
+              }`}
+            >
+              {keyboardSettings.visible ? 'Visível' : 'Oculto'}
+            </button>
+          </div>
+        </div>
+
+        {/* Section 2b: Audio Synthesis & Volume */}
+        <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <Music className="w-5 h-5 text-amber-400" />
               <div>
                 <h4 className="text-sm font-bold">Som do Teclado (Sintetizador)</h4>
@@ -688,6 +714,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {fps} FPS {fps === 24 && '(Cinema)'}
               </button>
             ))}
+          </div>
+
+          {/* Android Recording Performance Mode */}
+          <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-white block">Modo de Gravação</span>
+                <span className="text-[11px] text-zinc-400 block">
+                  Escolha se deseja gravar com o teclado desenhado ou gravação direta sem travamento
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                id="btn-rec-mode-overlay"
+                onClick={() => onUpdateCamera({ recordingMode: 'overlay' })}
+                className={`p-2 rounded-lg text-xs border text-left transition cursor-pointer ${
+                  (cameraSettings.recordingMode || 'overlay') === 'overlay'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                    : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-extrabold text-xs">Com Teclado (Overlay)</div>
+                <div className={`text-[10px] ${
+                  (cameraSettings.recordingMode || 'overlay') === 'overlay' ? 'text-black/80' : 'text-zinc-400'
+                }`}>
+                  Grava câmera + teclas iluminadas + acordes no vídeo
+                </div>
+              </button>
+
+              <button
+                type="button"
+                id="btn-rec-mode-direct"
+                onClick={() => onUpdateCamera({ recordingMode: 'direct' })}
+                className={`p-2 rounded-lg text-xs border text-left transition cursor-pointer ${
+                  cameraSettings.recordingMode === 'direct'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                    : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-extrabold text-xs">Direto (Hardware 0% Lag)</div>
+                <div className={`text-[10px] ${
+                  cameraSettings.recordingMode === 'direct' ? 'text-black/80' : 'text-zinc-400'
+                }`}>
+                  Gravação direta do sensor da câmera + áudio sintetizado (Ideal p/ Android antigo)
+                </div>
+              </button>
+            </div>
           </div>
         </div>
 

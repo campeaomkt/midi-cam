@@ -92,6 +92,7 @@ export interface CameraSettings {
   gridEnabled: boolean;
   micEnabled: boolean;
   flashEnabled: boolean;
+  recordingMode?: 'overlay' | 'direct'; // 'overlay' embeds keyboard & chord into video, 'direct' records raw camera stream for 0% CPU lag
 }
 
 export type WifiSyncMode = 'idle' | 'host' | 'client';
