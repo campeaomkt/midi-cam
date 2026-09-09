@@ -33,6 +33,8 @@ interface SettingsModalProps {
   keyboardSettings: KeyboardSettings;
   midiDevices: MidiDevice[];
   isMidiConnected: boolean;
+  activeSoundFontName?: string;
+  onOpenSoundFontModal?: () => void;
   onRequestMidi: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
@@ -45,6 +47,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   keyboardSettings,
   midiDevices,
   isMidiConnected,
+  activeSoundFontName,
+  onOpenSoundFontModal,
   onRequestMidi,
   onUpdateCamera,
   onUpdateKeyboard,
@@ -152,7 +156,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {keyboardSettings.soundEnabled && (
-            <div className="flex flex-col gap-1 mt-1">
+            <div className="flex flex-col gap-2 mt-1">
               <div className="flex justify-between text-xs text-zinc-300">
                 <span>Volume</span>
                 <span className="font-mono">{Math.round(keyboardSettings.synthVolume * 100)}%</span>
@@ -166,6 +170,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={(e) => onUpdateKeyboard({ synthVolume: parseFloat(e.target.value) })}
                 className="w-full accent-amber-400 h-1.5 bg-zinc-900 rounded-lg cursor-pointer"
               />
+
+              {/* SoundFont 2 (.sf2) Manager Trigger */}
+              {onOpenSoundFontModal && (
+                <div className="mt-2 pt-2.5 border-t border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="text-xs font-bold block text-white">Timbres & SoundFont (.sf2)</span>
+                      <span className="text-[11px] text-zinc-400 block">
+                        {activeSoundFontName ? `Ativo: ${activeSoundFontName}` : 'Usando sintetizador padrão'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenSoundFontModal}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 hover:text-amber-200 border border-amber-400/30 text-xs font-semibold transition active:scale-95"
+                  >
+                    Gerenciar Timbres
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

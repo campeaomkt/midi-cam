@@ -24,7 +24,10 @@ import { TypographyPositionModal } from './components/TypographyPositionModal';
 import { FilterSettingsDrawer } from './components/FilterSettingsDrawer';
 import { SettingsModal } from './components/SettingsModal';
 import { RecordedVideosModal } from './components/RecordedVideosModal';
+import { SoundFontManagerModal } from './components/SoundFontManagerModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { sf2Engine } from './utils/sf2Engine';
+import { loadSoundFontFromStorage } from './utils/sf2Storage';
 
 export default function App() {
   // Camera Configuration State
@@ -90,9 +93,44 @@ export default function App() {
   const [isFiltersDrawerOpen, setIsFiltersDrawerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [isSoundFontOpen, setIsSoundFontOpen] = useState(false);
+  const [activeSoundFontName, setActiveSoundFontName] = useState<string>('');
 
   // Video Element Ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Restore saved SF2 SoundFont from local device storage on app startup
+  useEffect(() => {
+    const restoreSavedSoundFont = async () => {
+      try {
+        const stored = await loadSoundFontFromStorage();
+        if (stored && stored.buffer) {
+          await sf2Engine.loadBuffer(stored.buffer, stored.name);
+          if (stored.activePresetIndex > 0) {
+            sf2Engine.selectPreset(stored.activePresetIndex);
+          }
+          const preset = sf2Engine.getActivePreset();
+          setActiveSoundFontName(
+            preset ? `${sf2Engine.getSoundFontName()} (${preset.name})` : sf2Engine.getSoundFontName()
+          );
+        }
+      } catch (err) {
+        console.warn('Could not restore saved SoundFont from storage:', err);
+      }
+    };
+
+    restoreSavedSoundFont();
+  }, []);
+
+  const handleSoundFontChanged = useCallback(() => {
+    if (sf2Engine.getIsLoaded()) {
+      const preset = sf2Engine.getActivePreset();
+      const sfName = sf2Engine.getSoundFontName();
+      setActiveSoundFontName(preset ? `${sfName} (${preset.name})` : sfName);
+    } else {
+      setActiveSoundFontName('');
+    }
+  }, []);
 
   // Get active filter object
   const activeFilter: FilterPreset = useMemo(() => {
@@ -328,11 +366,13 @@ export default function App() {
             keyboardSettings={keyboardSettings}
             midiDevices={midiDevices}
             isMidiConnected={isMidiConnected}
+            activeSoundFontName={activeSoundFontName}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenTypographyModal={() => setIsTypographyOpen(true)}
             onOpenPositionModal={() => setIsTypographyOpen(true)}
+            onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
             onRequestMidi={handleRequestMidi}
           />
         </header>
@@ -384,9 +424,18 @@ export default function App() {
         keyboardSettings={keyboardSettings}
         midiDevices={midiDevices}
         isMidiConnected={isMidiConnected}
+        activeSoundFontName={activeSoundFontName}
+        onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
         onRequestMidi={handleRequestMidi}
         onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
         onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
+      />
+
+      {/* SoundFont 2 (.sf2) Manager Modal */}
+      <SoundFontManagerModal
+        isOpen={isSoundFontOpen}
+        onClose={() => setIsSoundFontOpen(false)}
+        onSoundFontChanged={handleSoundFontChanged}
       />
 
       {/* Typography & Position Modal */}

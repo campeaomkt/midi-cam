@@ -13,7 +13,8 @@ import {
   MoveVertical,
   Cable,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Music,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -21,11 +22,13 @@ interface TopHudBarProps {
   keyboardSettings: KeyboardSettings;
   midiDevices: MidiDevice[];
   isMidiConnected: boolean;
+  activeSoundFontName?: string;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
   onOpenSettings: () => void;
   onOpenTypographyModal: () => void;
   onOpenPositionModal: () => void;
+  onOpenSoundFontModal: () => void;
   onRequestMidi: () => void;
 }
 
@@ -34,11 +37,13 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   keyboardSettings,
   midiDevices,
   isMidiConnected,
+  activeSoundFontName,
   onUpdateCamera,
   onUpdateKeyboard,
   onOpenSettings,
   onOpenTypographyModal,
   onOpenPositionModal,
+  onOpenSoundFontModal,
   onRequestMidi,
 }) => {
   return (
@@ -166,6 +171,24 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             title="Posição do Teclado"
           >
             <MoveVertical className="w-5 h-5" />
+          </button>
+
+          {/* SoundFont / Timbre (.sf2) Selector */}
+          <button
+            type="button"
+            id="btn-soundfont-modal"
+            onClick={onOpenSoundFontModal}
+            className={`flex items-center gap-1 transition active:scale-90 ${
+              activeSoundFontName
+                ? 'text-emerald-400 font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30'
+                : 'hover:text-amber-300 text-amber-400'
+            }`}
+            title="Motor de Som & Timbres (.sf2)"
+          >
+            <Music className="w-4 h-4" />
+            <span className="text-[10px] uppercase font-bold tracking-tight">
+              {activeSoundFontName ? activeSoundFontName.slice(0, 10) : 'SF2'}
+            </span>
           </button>
         </div>
 

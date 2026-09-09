@@ -1,6 +1,9 @@
 /**
- * Polyphonic Piano / Electric Piano Synthesizer with Audio Stream mixing for Recording
+ * Polyphonic Piano / Electric Piano Synthesizer with SF2 SoundFont sample playback
+ * and Audio Stream mixing for Video Recording
  */
+
+import { sf2Engine } from './sf2Engine';
 
 class AudioSynthManager {
   private ctx: AudioContext | null = null;
@@ -10,7 +13,7 @@ class AudioSynthManager {
   private isMuted: boolean = false;
   private volume: number = 0.7;
 
-  private initContext() {
+  public initContext() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
@@ -26,6 +29,11 @@ class AudioSynthManager {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
+  }
+
+  public getAudioContext(): AudioContext {
+    this.initContext();
+    return this.ctx!;
   }
 
   public getAudioStreamDestination(): MediaStreamAudioDestinationNode | null {
@@ -51,7 +59,15 @@ class AudioSynthManager {
     this.initContext();
     if (!this.ctx || !this.masterGain) return;
 
-    // Release existing voice for this note if still ringing
+    // 1. If an SF2 SoundFont is loaded, play authentic real sampled timbre
+    if (sf2Engine.getIsLoaded()) {
+      const played = sf2Engine.playNote(this.ctx, this.masterGain, midiNumber, velocity);
+      if (played) {
+        return;
+      }
+    }
+
+    // 2. Fallback to built-in acoustic/electric piano synthesizer
     this.stopNote(midiNumber);
 
     const freq = 440 * Math.pow(2, (midiNumber - 69) / 12);
@@ -122,6 +138,12 @@ class AudioSynthManager {
   }
 
   public stopNote(midiNumber: number) {
+    // 1. Release SF2 sample voice if loaded
+    if (sf2Engine.getIsLoaded()) {
+      sf2Engine.stopNote(midiNumber, this.ctx || undefined);
+    }
+
+    // 2. Release synth voice if sounding
     const voice = this.activeVoices.get(midiNumber);
     if (!voice || !this.ctx) return;
 
@@ -149,6 +171,9 @@ class AudioSynthManager {
   }
 
   public stopAllNotes() {
+    if (sf2Engine.getIsLoaded()) {
+      sf2Engine.stopAllVoices();
+    }
     this.activeVoices.forEach((_, note) => {
       this.stopNote(note);
     });
@@ -157,3 +182,4 @@ class AudioSynthManager {
 }
 
 export const audioSynth = new AudioSynthManager();
+
