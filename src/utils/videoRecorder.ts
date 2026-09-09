@@ -259,7 +259,7 @@ export class VideoRecorderManager {
         // 3. Draw piano keyboard overlay from pre-calculated geometry & active notes
         if (cachedWhiteKeys.length > 0) {
           const activeNotes = getNotes();
-          const activeSet = new Set(activeNotes);
+          const hasNotes = activeNotes && activeNotes.length > 0;
 
           // Keyboard background base
           ctx.fillStyle = '#ffffff';
@@ -268,7 +268,7 @@ export class VideoRecorderManager {
           // Render White Keys
           for (let i = 0; i < cachedWhiteKeys.length; i++) {
             const key = cachedWhiteKeys[i];
-            const isKeyActive = activeSet.has(key.midi);
+            const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
 
             ctx.fillStyle = isKeyActive ? activeColor : '#ffffff';
             ctx.fillRect(key.x, key.y, key.w, key.h);
@@ -285,7 +285,7 @@ export class VideoRecorderManager {
           // Render Black Keys
           for (let i = 0; i < cachedBlackKeys.length; i++) {
             const key = cachedBlackKeys[i];
-            const isKeyActive = activeSet.has(key.midi);
+            const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
 
             ctx.fillStyle = isKeyActive ? activeDarkColor : '#18181b';
             ctx.fillRect(key.x, key.y, key.w, key.h);
@@ -300,7 +300,7 @@ export class VideoRecorderManager {
       const combinedTracks: MediaStreamTrack[] = [...canvasStream.getVideoTracks(), ...audioTracks];
       const combinedStream = new MediaStream(combinedTracks);
 
-      // Codec selection: VP8 is universally hardware-accelerated on Android Qualcomm/MediaTek
+      // Codec selection: Prioritize hardware-accelerated H.264 / MP4 (supported in Android 10+ Chrome)
       const mimeTypes = isIOS
         ? [
             'video/mp4;codecs=avc1',
@@ -310,11 +310,14 @@ export class VideoRecorderManager {
           ]
         : isAndroid
         ? [
+            'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+            'video/mp4;codecs=avc1',
+            'video/mp4',
+            'video/webm;codecs=h264,opus',
+            'video/webm;codecs=h264',
             'video/webm;codecs=vp8,opus',
             'video/webm;codecs=vp8',
             'video/webm',
-            'video/mp4;codecs=avc1',
-            'video/mp4',
           ]
         : [
             'video/webm;codecs=vp8,opus',
@@ -332,10 +335,10 @@ export class VideoRecorderManager {
         }
       }
 
-      // Configure MediaRecorder with smooth 2.0 Mbps bitrate for Android tablets
+      // Configure MediaRecorder with crisp 4.0 Mbps bitrate for clear camera quality
       const options: MediaRecorderOptions = {
         ...(selectedMime ? { mimeType: selectedMime } : {}),
-        videoBitsPerSecond: isAndroid ? 2000000 : 2500000,
+        videoBitsPerSecond: 4000000,
       };
 
       this.mediaRecorder = new MediaRecorder(combinedStream, options);
