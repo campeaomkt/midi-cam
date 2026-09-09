@@ -178,16 +178,16 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             type="button"
             id="btn-soundfont-modal"
             onClick={onOpenSoundFontModal}
-            className={`flex items-center gap-1 transition active:scale-90 ${
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full transition active:scale-90 cursor-pointer ${
               activeSoundFontName
-                ? 'text-emerald-400 font-bold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30'
+                ? 'text-amber-300 font-bold bg-amber-400/20 border border-amber-400/40 shadow-sm'
                 : 'hover:text-amber-300 text-amber-400'
             }`}
-            title="Motor de Som & Timbres (.sf2)"
+            title="Central de Timbres & Sons"
           >
-            <Music className="w-4 h-4" />
-            <span className="text-[10px] uppercase font-bold tracking-tight">
-              {activeSoundFontName ? activeSoundFontName.slice(0, 10) : 'SF2'}
+            <Music className="w-3.5 h-3.5" />
+            <span className="text-[10.5px] font-bold tracking-tight truncate max-w-[100px]">
+              {activeSoundFontName || 'Piano'}
             </span>
           </button>
         </div>

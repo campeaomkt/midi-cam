@@ -46,6 +46,21 @@ class SF2EngineManager {
     try {
       this.clearCurrentSoundFont();
 
+      if (!buffer || buffer.byteLength < 16) {
+        throw new Error('Arquivo corrompido ou vazio.');
+      }
+
+      // Check RIFF and sfbk header
+      const headerBytes = new Uint8Array(buffer.slice(0, 12));
+      const riffHeader = String.fromCharCode(...headerBytes.slice(0, 4));
+      const sfbkHeader = String.fromCharCode(...headerBytes.slice(8, 12));
+
+      if (riffHeader !== 'RIFF' || sfbkHeader !== 'sfbk') {
+        throw new Error(
+          'O arquivo não possui o formato SoundFont 2 (RIFF sfbk). Se você baixou um .zip ou .sf3, extraia o arquivo .sf2 antes de carregar.'
+        );
+      }
+
       const uint8 = new Uint8Array(buffer);
       const sf2 = new SoundFont2(uint8);
       this.sf2Instance = sf2;
@@ -83,10 +98,11 @@ class SF2EngineManager {
       };
 
       return this.metadata;
-    } catch (err) {
+    } catch (err: any) {
       this.clearCurrentSoundFont();
       console.error('Error parsing SF2 SoundFont:', err);
-      throw new Error('Falha ao processar o arquivo SF2. Verifique se é um arquivo SoundFont 2 válido.');
+      const msg = err?.message || 'Falha ao processar o arquivo SF2. Verifique se é um arquivo SoundFont 2 válido.';
+      throw new Error(msg);
     }
   }
 
@@ -157,17 +173,46 @@ class SF2EngineManager {
 
     try {
       // Query sample and key data from SF2 for current note and preset
-      const keyData = this.sf2Instance.getKeyData(
-        midiNumber,
-        activePreset.bank,
-        activePreset.preset
-      );
+      let keyData: any = null;
+      try {
+        keyData = this.sf2Instance.getKeyData(
+          midiNumber,
+          activePreset.bank,
+          activePreset.preset
+        );
+      } catch {
+        keyData = null;
+      }
 
-      if (!keyData || !keyData.sample || !keyData.sample.data || keyData.sample.data.length === 0) {
+      let sample = keyData?.sample;
+
+      // Fallback: If no sample zone mapped for this exact note, find nearest sample in SF2 by pitch
+      if (!sample || !sample.data || sample.data.length === 0) {
+        const availableSamples = this.sf2Instance.samples.filter(
+          (s) => s && s.data && s.data.length > 0 && s.header && s.header.name !== 'EOS'
+        );
+        if (availableSamples.length === 0) {
+          return false;
+        }
+
+        let bestSample = availableSamples[0];
+        let minDiff = Math.abs((bestSample.header.originalPitch || 60) - midiNumber);
+
+        for (let i = 1; i < availableSamples.length; i++) {
+          const s = availableSamples[i];
+          const diff = Math.abs((s.header.originalPitch || 60) - midiNumber);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestSample = s;
+          }
+        }
+        sample = bestSample;
+      }
+
+      if (!sample || !sample.data || sample.data.length === 0) {
         return false;
       }
 
-      const sample = keyData.sample;
       const sampleHeader = sample.header;
 
       // Get or create AudioBuffer for this sample

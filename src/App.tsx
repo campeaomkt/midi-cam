@@ -28,6 +28,7 @@ import { SoundFontManagerModal } from './components/SoundFontManagerModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { sf2Engine } from './utils/sf2Engine';
 import { loadSoundFontFromStorage } from './utils/sf2Storage';
+import { timbreEngine } from './utils/timbreEngine';
 
 export default function App() {
   // Camera Configuration State
@@ -94,10 +95,30 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isSoundFontOpen, setIsSoundFontOpen] = useState(false);
-  const [activeSoundFontName, setActiveSoundFontName] = useState<string>('');
+  const [activeSoundFontName, setActiveSoundFontName] = useState<string>(() =>
+    timbreEngine.getActiveTimbreName()
+  );
 
   // Video Element Ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const handleSoundFontChanged = useCallback(() => {
+    if (timbreEngine.getMode() === 'custom_sf2' && sf2Engine.getIsLoaded()) {
+      const preset = sf2Engine.getActivePreset();
+      const sfName = sf2Engine.getSoundFontName();
+      setActiveSoundFontName(preset ? `${sfName} (${preset.name})` : sfName);
+    } else {
+      setActiveSoundFontName(timbreEngine.getActiveTimbreName());
+    }
+  }, []);
+
+  // Sync with timbre engine changes
+  useEffect(() => {
+    const unsub = timbreEngine.subscribe(() => {
+      handleSoundFontChanged();
+    });
+    return unsub;
+  }, [handleSoundFontChanged]);
 
   // Restore saved SF2 SoundFont from local device storage on app startup
   useEffect(() => {
@@ -109,10 +130,12 @@ export default function App() {
           if (stored.activePresetIndex > 0) {
             sf2Engine.selectPreset(stored.activePresetIndex);
           }
-          const preset = sf2Engine.getActivePreset();
-          setActiveSoundFontName(
-            preset ? `${sf2Engine.getSoundFontName()} (${preset.name})` : sf2Engine.getSoundFontName()
-          );
+          if (timbreEngine.getMode() === 'custom_sf2') {
+            const preset = sf2Engine.getActivePreset();
+            setActiveSoundFontName(
+              preset ? `${sf2Engine.getSoundFontName()} (${preset.name})` : sf2Engine.getSoundFontName()
+            );
+          }
         }
       } catch (err) {
         console.warn('Could not restore saved SoundFont from storage:', err);
@@ -120,16 +143,6 @@ export default function App() {
     };
 
     restoreSavedSoundFont();
-  }, []);
-
-  const handleSoundFontChanged = useCallback(() => {
-    if (sf2Engine.getIsLoaded()) {
-      const preset = sf2Engine.getActivePreset();
-      const sfName = sf2Engine.getSoundFontName();
-      setActiveSoundFontName(preset ? `${sfName} (${preset.name})` : sfName);
-    } else {
-      setActiveSoundFontName('');
-    }
   }, []);
 
   // Get active filter object

@@ -1,9 +1,12 @@
 /**
- * Polyphonic Piano / Electric Piano Synthesizer with SF2 SoundFont sample playback
+ * Polyphonic Piano / Electric Piano Synthesizer with SF2 SoundFont sample playback,
+ * Studio Sampled Instruments (Grand Piano, Rhodes, Accordion, Strings, Organ)
  * and Audio Stream mixing for Video Recording
  */
 
 import { sf2Engine } from './sf2Engine';
+import { timbreEngine } from './timbreEngine';
+import { unlockAudioContext, setupAutoUnlock } from './iosAudioUnlock';
 
 class AudioSynthManager {
   private ctx: AudioContext | null = null;
@@ -12,6 +15,13 @@ class AudioSynthManager {
   private activeVoices: Map<number, { oscillators: OscillatorNode[]; gain: GainNode }> = new Map();
   private isMuted: boolean = false;
   private volume: number = 0.7;
+
+  constructor() {
+    // Setup automatic auto-unlock on first user tap/pointerdown
+    if (typeof window !== 'undefined') {
+      setupAutoUnlock(() => this.ctx);
+    }
+  }
 
   public initContext() {
     if (!this.ctx) {
@@ -24,11 +34,13 @@ class AudioSynthManager {
       // Create stream destination for combining with video recording
       this.streamDestination = this.ctx.createMediaStreamDestination();
       this.masterGain.connect(this.streamDestination);
+
+      // Initialize the timbre engine with this AudioContext and masterGain
+      timbreEngine.init(this.ctx, this.masterGain);
     }
 
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
+    // Unlock context and iOS silent mode
+    unlockAudioContext(this.ctx);
   }
 
   public getAudioContext(): AudioContext {
@@ -59,12 +71,10 @@ class AudioSynthManager {
     this.initContext();
     if (!this.ctx || !this.masterGain) return;
 
-    // 1. If an SF2 SoundFont is loaded, play authentic real sampled timbre
-    if (sf2Engine.getIsLoaded()) {
-      const played = sf2Engine.playNote(this.ctx, this.masterGain, midiNumber, velocity);
-      if (played) {
-        return;
-      }
+    // 1. Play through Timbre Engine (Built-in Grand Piano, Rhodes, Accordion, Strings, or custom SF2)
+    const handled = timbreEngine.playNote(midiNumber, velocity);
+    if (handled) {
+      return;
     }
 
     // 2. Fallback to built-in acoustic/electric piano synthesizer
