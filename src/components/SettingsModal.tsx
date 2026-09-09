@@ -16,7 +16,6 @@ import {
   Check,
   Sparkles,
   Smartphone,
-  Tablet,
   HelpCircle,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
@@ -35,8 +34,6 @@ interface SettingsModalProps {
   midiDevices: MidiDevice[];
   isMidiConnected: boolean;
   activeSoundFontName?: string;
-  deviceLayoutMode?: 'tablet' | 'phone';
-  onToggleDeviceLayout?: () => void;
   onOpenSoundFontModal?: () => void;
   onRequestMidi: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
@@ -51,8 +48,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   midiDevices,
   isMidiConnected,
   activeSoundFontName,
-  deviceLayoutMode = 'tablet',
-  onToggleDeviceLayout,
   onOpenSoundFontModal,
   onRequestMidi,
   onUpdateCamera,
@@ -638,53 +633,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             ))}
           </div>
         </div>
-
-        {/* Section: Display Layout Mode (Tablet vs Phone) */}
-        {onToggleDeviceLayout && (
-          <div className="flex flex-col gap-2.5 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Tablet className="w-5 h-5 text-cyan-400" />
-                <div>
-                  <h4 className="text-sm font-bold">Modo de Exibição / Layout</h4>
-                  <p className="text-xs text-zinc-400">Otimizado para iPad/Tablet ou moldura 9:16 de Celular</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  if (deviceLayoutMode !== 'tablet') onToggleDeviceLayout();
-                }}
-                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                  deviceLayoutMode === 'tablet'
-                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.25)]'
-                    : 'bg-zinc-900 border-white/10 text-zinc-400 hover:bg-zinc-800'
-                }`}
-              >
-                <Tablet className="w-4 h-4" />
-                <span>Tablet / Tela Cheia</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (deviceLayoutMode !== 'phone') onToggleDeviceLayout();
-                }}
-                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                  deviceLayoutMode === 'phone'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
-                    : 'bg-zinc-900 border-white/10 text-zinc-400 hover:bg-zinc-800'
-                }`}
-              >
-                <Smartphone className="w-4 h-4" />
-                <span>Celular (9:16 Reels)</span>
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Section 5: PWA Install App & iOS Permissions */}
         <div className="flex flex-col gap-2">

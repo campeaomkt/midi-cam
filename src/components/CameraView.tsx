@@ -443,21 +443,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
           }`}
         >
           <div className="relative w-full flex flex-col items-center">
-            {/* Real-time Detected Chord Display - Absolutely positioned above keyboard so it NEVER pushes or moves the keyboard */}
-            <div className="absolute bottom-full mb-1 sm:mb-2 inset-x-0 flex justify-center items-center pointer-events-none z-30">
-              <div className="relative flex items-center justify-center">
-                <ChordDisplay
-                  chord={currentChord}
-                  fontSize={chordFontSize}
-                  color={chordColor}
-                />
-                {isSustainActive && (
-                  <div className="ml-3 px-2.5 py-0.5 rounded-full bg-amber-500/25 border border-amber-400/50 text-amber-300 text-[10.5px] font-extrabold tracking-wider flex items-center gap-1.5 shadow-[0_0_10px_rgba(245,158,11,0.4)] backdrop-blur-md animate-pulse">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                    <span>PEDAL</span>
-                  </div>
-                )}
-              </div>
+            {/* Real-time Detected Chord Display - Fixed height container so it NEVER shifts the keyboard */}
+            <div className="w-full h-10 sm:h-13 flex items-center justify-center pointer-events-none select-none">
+              <ChordDisplay
+                chord={currentChord}
+                fontSize={chordFontSize}
+                color={chordColor}
+              />
             </div>
 
             {/* Virtual Keyboard with crisp straight edges, soft shadow, static touch */}

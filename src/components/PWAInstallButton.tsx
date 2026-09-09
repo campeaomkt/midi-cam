@@ -16,12 +16,16 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showModal, setShowModal] = useState(false);
 
-  // If already running as installed standalone PWA, don't show the install CTA
-  if (isInstalled) {
+  // If already running as installed standalone PWA, only hide the badge variant, keep settings item accessible
+  if (isInstalled && variant !== 'settings-item') {
     return null;
   }
 
   const handleClick = async () => {
+    if (variant === 'settings-item') {
+      setShowModal(true);
+      return;
+    }
     if (isInstallable) {
       const installed = await install();
       if (!installed) {
