@@ -730,37 +730,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                id="btn-rec-mode-overlay"
-                onClick={() => onUpdateCamera({ recordingMode: 'overlay' })}
-                className={`p-2 rounded-lg text-xs border text-left transition cursor-pointer ${
-                  (cameraSettings.recordingMode || 'overlay') === 'overlay'
-                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                id="btn-rec-mode-direct"
+                onClick={() => onUpdateCamera({ recordingMode: 'direct' })}
+                className={`p-2.5 rounded-xl text-xs border text-left transition cursor-pointer flex flex-col justify-between ${
+                  (cameraSettings.recordingMode || 'direct') === 'direct'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/30'
                     : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
-                <div className="font-extrabold text-xs">Com Teclado (Overlay)</div>
-                <div className={`text-[10px] ${
-                  (cameraSettings.recordingMode || 'overlay') === 'overlay' ? 'text-black/80' : 'text-zinc-400'
-                }`}>
-                  Grava câmera + teclas iluminadas + acordes no vídeo
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-extrabold text-xs">Direto (Hardware)</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                      (cameraSettings.recordingMode || 'direct') === 'direct'
+                        ? 'bg-black text-amber-400'
+                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    }`}>
+                      0% Lag
+                    </span>
+                  </div>
+                  <div className={`text-[10px] leading-tight ${
+                    (cameraSettings.recordingMode || 'direct') === 'direct' ? 'text-black/80 font-medium' : 'text-zinc-400'
+                  }`}>
+                    Grava o sensor da câmera fluido a 60 FPS + áudio perfeito do piano/MIDI. Recomendado!
+                  </div>
                 </div>
               </button>
 
               <button
                 type="button"
-                id="btn-rec-mode-direct"
-                onClick={() => onUpdateCamera({ recordingMode: 'direct' })}
-                className={`p-2 rounded-lg text-xs border text-left transition cursor-pointer ${
-                  cameraSettings.recordingMode === 'direct'
-                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                id="btn-rec-mode-overlay"
+                onClick={() => onUpdateCamera({ recordingMode: 'overlay' })}
+                className={`p-2.5 rounded-xl text-xs border text-left transition cursor-pointer flex flex-col justify-between ${
+                  cameraSettings.recordingMode === 'overlay'
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/30'
                     : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
-                <div className="font-extrabold text-xs">Direto (Hardware 0% Lag)</div>
-                <div className={`text-[10px] ${
-                  cameraSettings.recordingMode === 'direct' ? 'text-black/80' : 'text-zinc-400'
-                }`}>
-                  Gravação direta do sensor da câmera + áudio sintetizado (Ideal p/ Android antigo)
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-extrabold text-xs">Com Teclado (Overlay)</span>
+                  </div>
+                  <div className={`text-[10px] leading-tight ${
+                    cameraSettings.recordingMode === 'overlay' ? 'text-black/80 font-medium' : 'text-zinc-400'
+                  }`}>
+                    Grava o desenho das teclas acesas no arquivo de vídeo (pode causar queda de frames no Android).
+                  </div>
                 </div>
               </button>
             </div>

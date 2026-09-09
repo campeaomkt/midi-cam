@@ -28,6 +28,7 @@ export class VideoRecorderManager {
   private onRecordingComplete: ((recording: VideoRecording) => void) | null = null;
   private animFrameId: number | null = null;
   private compositeCanvas: HTMLCanvasElement | null = null;
+  private currentVideoElement: HTMLVideoElement | null = null;
 
   public getIsRecording(): boolean {
     return this.isRecording;
@@ -93,6 +94,7 @@ export class VideoRecorderManager {
     }
 
     if (!videoElement) return false;
+    this.currentVideoElement = videoElement;
 
     try {
       this.recordedChunks = [];
@@ -305,8 +307,10 @@ export class VideoRecorderManager {
       if (isDirectMode) {
         const rawStream = videoElement.srcObject as MediaStream;
         videoTracksToRecord = rawStream.getVideoTracks();
-      } else {
-        // Overlay mode: capture rendered composite canvas
+      }
+
+      // Safe fallback: if direct tracks were empty or overlay mode is requested
+      if (videoTracksToRecord.length === 0) {
         const canvasStream = canvas.captureStream(30);
         videoTracksToRecord = canvasStream.getVideoTracks();
       }
@@ -423,9 +427,20 @@ export class VideoRecorderManager {
     const blob = new Blob(this.recordedChunks, { type: mimeType });
     const url = URL.createObjectURL(blob);
 
-    // Generate thumbnail from composite canvas
+    // Generate thumbnail from current frame or composite canvas
     let thumbnailUrl = '';
-    if (this.compositeCanvas) {
+    if (this.currentVideoElement && this.compositeCanvas) {
+      try {
+        const ctx = this.compositeCanvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(this.currentVideoElement, 0, 0, this.compositeCanvas.width, this.compositeCanvas.height);
+          thumbnailUrl = this.compositeCanvas.toDataURL('image/jpeg', 0.65);
+        }
+      } catch {
+        thumbnailUrl = '';
+      }
+    }
+    if (!thumbnailUrl && this.compositeCanvas) {
       try {
         thumbnailUrl = this.compositeCanvas.toDataURL('image/jpeg', 0.65);
       } catch {

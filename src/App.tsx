@@ -43,7 +43,7 @@ export default function App() {
     gridEnabled: false,
     micEnabled: true,
     flashEnabled: false,
-    recordingMode: 'overlay',
+    recordingMode: 'direct', // Default to Direct (Hardware 0% Lag) for crystal clear smooth recording
   });
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
