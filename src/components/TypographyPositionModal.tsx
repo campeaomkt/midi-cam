@@ -40,7 +40,7 @@ export const TypographyPositionModal: React.FC<TypographyPositionModalProps> = (
       id="typography-position-modal"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-150"
     >
-      <div className="relative w-full max-w-md bg-zinc-900 border border-white/20 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-md md:max-w-2xl lg:max-w-3xl bg-zinc-900 border border-white/20 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div>

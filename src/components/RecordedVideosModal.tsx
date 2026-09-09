@@ -118,7 +118,7 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
         onChange={handleFileInputChange}
       />
 
-      <div className="relative w-full max-w-lg bg-zinc-900 border border-white/20 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 text-white max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full max-w-lg md:max-w-4xl bg-zinc-900 border border-white/20 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 text-white max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div className="flex items-center gap-2.5">
@@ -164,7 +164,7 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
         {/* Active Selected Video Player */}
         {selectedVideo ? (
           <div className="flex flex-col gap-3">
-            <div className="relative w-full aspect-[9/16] max-h-[46vh] bg-black rounded-xl overflow-hidden border border-white/15 flex items-center justify-center shadow-lg">
+            <div className="relative w-full aspect-[9/16] md:aspect-video max-h-[48vh] bg-black rounded-xl overflow-hidden border border-white/15 flex items-center justify-center shadow-lg">
               <video
                 key={selectedVideo.id}
                 src={selectedVideo.url}
@@ -282,7 +282,7 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
         {recordings.length > 1 && (
           <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
             <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Outras Gravações</span>
-            <div className="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 max-h-48 overflow-y-auto">
               {recordings.map((rec, index) => {
                 const isSelected = selectedVideo?.id === rec.id;
                 return (

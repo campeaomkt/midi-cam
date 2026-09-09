@@ -74,9 +74,14 @@ class MidiManager {
 
   public async requestAccess(): Promise<{ success: boolean; message?: string }> {
     if (!this.isSupported) {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
       return {
         success: false,
-        message: 'Web MIDI API não é suportada por este navegador (recomendado: Chrome, Edge, Brave no Android/Desktop).'
+        message: isIOS
+          ? 'A Apple não permite Web MIDI no Safari nem no Chrome do iOS. Para usar no iPhone/iPad, baixe o app gratuito "Web MIDI Browser" na App Store e abra o link do app por ele!'
+          : 'Web MIDI API não é suportada por este navegador (recomendado: Chrome, Edge ou Brave no Android/PC/Mac).'
       };
     }
 

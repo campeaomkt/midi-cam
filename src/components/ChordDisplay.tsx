@@ -20,9 +20,9 @@ export const ChordDisplay: React.FC<ChordDisplayProps> = ({
   }
 
   const fontSizeClasses = {
-    medium: 'text-2xl sm:text-[28px]',
-    large: 'text-[29px] sm:text-[36px]',
-    huge: 'text-4xl sm:text-[44px]',
+    medium: 'text-2xl sm:text-[28px] md:text-[34px] lg:text-[42px]',
+    large: 'text-[29px] sm:text-[36px] md:text-[46px] lg:text-[58px]',
+    huge: 'text-4xl sm:text-[44px] md:text-[58px] lg:text-[72px]',
   };
 
   return (

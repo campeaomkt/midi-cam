@@ -31,38 +31,37 @@ export function getKeyboardHeightClass(
   preset: 'slim' | 'normal' | 'compact' | string = 'normal'
 ): string {
   if (viewMode === 'scroll' && keyCount >= 61) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px]';
-    return 'h-[72px] sm:h-[82px]';
+    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[84px] lg:h-[96px]';
+    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[92px] lg:h-[106px]';
+    return 'h-[72px] sm:h-[82px] md:h-[102px] lg:h-[118px]';
   }
 
   // Exact proportions based on user's reference screenshot:
-  // In the screenshot, 61 keys has a classic, comfortable vertical presence (~70px on mobile, ~80px on desktop)
-  // where the keys are well-proportioned, distinct vertical rectangles.
+  // On phone: ~70px, on tablet: ~96px-116px where keys are well-proportioned, distinct vertical rectangles.
   if (keyCount >= 61) {
-    if (preset === 'slim') return 'h-[58px] sm:h-[66px]';
-    if (preset === 'compact') return 'h-[64px] sm:h-[72px]';
-    return 'h-[70px] sm:h-[80px]';
+    if (preset === 'slim') return 'h-[58px] sm:h-[66px] md:h-[84px] lg:h-[96px]';
+    if (preset === 'compact') return 'h-[64px] sm:h-[72px] md:h-[92px] lg:h-[106px]';
+    return 'h-[70px] sm:h-[80px] md:h-[100px] lg:h-[116px]';
   }
 
   // 44 & 49 keys:
   if (keyCount >= 44) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px]';
-    return 'h-[72px] sm:h-[82px]';
+    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[86px] lg:h-[98px]';
+    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[94px] lg:h-[108px]';
+    return 'h-[72px] sm:h-[82px] md:h-[104px] lg:h-[120px]';
   }
 
   // 37 keys:
   if (keyCount >= 37) {
-    if (preset === 'slim') return 'h-[62px] sm:h-[70px]';
-    if (preset === 'compact') return 'h-[68px] sm:h-[76px]';
-    return 'h-[74px] sm:h-[84px]';
+    if (preset === 'slim') return 'h-[62px] sm:h-[70px] md:h-[88px] lg:h-[100px]';
+    if (preset === 'compact') return 'h-[68px] sm:h-[76px] md:h-[96px] lg:h-[110px]';
+    return 'h-[74px] sm:h-[84px] md:h-[106px] lg:h-[122px]';
   }
 
   // 25 & 32 keys:
-  if (preset === 'slim') return 'h-[64px] sm:h-[72px]';
-  if (preset === 'compact') return 'h-[70px] sm:h-[78px]';
-  return 'h-[76px] sm:h-[86px]';
+  if (preset === 'slim') return 'h-[64px] sm:h-[72px] md:h-[90px] lg:h-[104px]';
+  if (preset === 'compact') return 'h-[70px] sm:h-[78px] md:h-[98px] lg:h-[114px]';
+  return 'h-[76px] sm:h-[86px] md:h-[110px] lg:h-[126px]';
 }
 
 interface KeyData {
@@ -364,8 +363,14 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   const isLargeKeyboard = effectiveKeyCount >= 61;
   const isScrollActive = isLargeKeyboard && viewMode === 'scroll';
   const heightClass = getKeyboardHeightClass(effectiveKeyCount, viewMode, heightPreset);
-  const noteLabelSize = effectiveKeyCount >= 61 ? 'text-[6.5px]' : effectiveKeyCount >= 44 ? 'text-[7.5px]' : 'text-[8.5px]';
-  const blackNoteLabelSize = effectiveKeyCount >= 61 ? 'text-[5.5px]' : 'text-[7px]';
+  const noteLabelSize = effectiveKeyCount >= 61 
+    ? 'text-[6.5px] sm:text-[7.5px] md:text-[9.5px] lg:text-[10.5px]' 
+    : effectiveKeyCount >= 44 
+    ? 'text-[7.5px] sm:text-[8.5px] md:text-[10.5px]' 
+    : 'text-[8.5px] sm:text-[10px] md:text-xs';
+  const blackNoteLabelSize = effectiveKeyCount >= 61 
+    ? 'text-[5.5px] sm:text-[6.5px] md:text-[8.5px]' 
+    : 'text-[7px] sm:text-[8px] md:text-[9.5px]';
 
   return (
     <div
@@ -373,7 +378,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       data-active-color={effectiveColor}
       data-active-dark-color={darkerColor}
       data-glow-intensity={glowIntensity}
-      className="relative w-[92%] sm:w-[88%] max-w-xl mx-auto flex flex-col select-none"
+      className="relative w-[95%] sm:w-[92%] md:w-[94%] max-w-5xl mx-auto flex flex-col select-none"
     >
       {/* Main Piano Keyboard with subtle soft shadow and crisp straight edges matching screenshot */}
       <div

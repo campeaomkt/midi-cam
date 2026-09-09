@@ -100,6 +100,31 @@ export default function App() {
     timbreEngine.getActiveTimbreName()
   );
 
+  // Tablet vs Phone Frame display mode
+  // If user is on an iPad, tablet or larger screen, defaults to responsive tablet canvas with option to toggle to phone reel preview
+  const [deviceLayoutMode, setDeviceLayoutMode] = useState<'tablet' | 'phone'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('midicam_layout_mode');
+      if (saved === 'tablet' || saved === 'phone') return saved;
+      const isTabletOrDesktop =
+        window.innerWidth >= 640 ||
+        /ipad|tablet/i.test(navigator.userAgent.toLowerCase()) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      return isTabletOrDesktop ? 'tablet' : 'phone';
+    }
+    return 'phone';
+  });
+
+  const handleToggleDeviceLayout = useCallback(() => {
+    setDeviceLayoutMode((prev) => {
+      const next = prev === 'tablet' ? 'phone' : 'tablet';
+      try {
+        localStorage.setItem('midicam_layout_mode', next);
+      } catch {}
+      return next;
+    });
+  }, []);
+
   // Video Element Ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -393,13 +418,19 @@ export default function App() {
       {/* Offline Status Badge for PWA */}
       <OfflineIndicator />
 
-      {/* Mobile Device Container Frame (matching portrait phone in reference image) */}
+      {/* Device Container Frame: Full Responsive Tablet Mode OR Classic Phone Reels Simulator */}
       <main
         id="camera-app-frame"
-        className="relative w-full h-full sm:max-w-[430px] sm:h-[92vh] sm:rounded-[44px] sm:border-[8px] sm:border-[#2d0909] sm:shadow-[0_25px_60px_rgba(0,0,0,0.9)] overflow-hidden bg-black flex flex-col justify-between select-none"
+        className={`relative w-full h-full overflow-hidden bg-black flex flex-col justify-between select-none transition-all duration-300 ${
+          deviceLayoutMode === 'tablet'
+            ? 'sm:max-w-none sm:h-full sm:rounded-none sm:border-0 sm:shadow-none'
+            : 'sm:max-w-[430px] sm:h-[92vh] sm:rounded-[44px] sm:border-[8px] sm:border-[#2d0909] sm:shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+        }`}
       >
-        {/* Dynamic Island / Top Speaker Notch Simulation for realistic phone preview */}
-        <div className="hidden sm:block absolute top-2.5 left-1/2 -translate-x-1/2 w-28 h-4.5 bg-black rounded-full z-40 border border-white/10 pointer-events-none" />
+        {/* Dynamic Island Notch Simulation (only visible in Phone frame simulator mode) */}
+        {deviceLayoutMode === 'phone' && (
+          <div className="hidden sm:block absolute top-2.5 left-1/2 -translate-x-1/2 w-28 h-4.5 bg-black rounded-full z-40 border border-white/10 pointer-events-none" />
+        )}
 
         {/* Top Camera Status & HUD Bar */}
         <header className="relative z-30 pt-safe">
@@ -410,6 +441,8 @@ export default function App() {
             isMidiConnected={isMidiConnected}
             activeSoundFontName={activeSoundFontName}
             isSustainActive={isSustainActive}
+            deviceLayoutMode={deviceLayoutMode}
+            onToggleDeviceLayout={handleToggleDeviceLayout}
             onToggleSustain={handleToggleSustain}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
@@ -470,6 +503,8 @@ export default function App() {
         midiDevices={midiDevices}
         isMidiConnected={isMidiConnected}
         activeSoundFontName={activeSoundFontName}
+        deviceLayoutMode={deviceLayoutMode}
+        onToggleDeviceLayout={handleToggleDeviceLayout}
         onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
         onRequestMidi={handleRequestMidi}
         onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}

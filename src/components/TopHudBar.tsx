@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Music,
+  Tablet,
+  Smartphone,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -24,6 +26,8 @@ interface TopHudBarProps {
   isMidiConnected: boolean;
   activeSoundFontName?: string;
   isSustainActive?: boolean;
+  deviceLayoutMode?: 'tablet' | 'phone';
+  onToggleDeviceLayout?: () => void;
   onToggleSustain?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
@@ -41,6 +45,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   isMidiConnected,
   activeSoundFontName,
   isSustainActive = false,
+  deviceLayoutMode = 'tablet',
+  onToggleDeviceLayout,
   onToggleSustain,
   onUpdateCamera,
   onUpdateKeyboard,
@@ -51,11 +57,11 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   onRequestMidi,
 }) => {
   return (
-    <div id="top-hud-bar" className="w-full flex flex-col gap-2 pt-2 px-3 z-30 select-none">
+    <div id="top-hud-bar" className="w-full flex flex-col gap-2 pt-2 md:pt-3 px-3 md:px-5 z-30 select-none">
       {/* Primary Status HUD Row */}
-      <div className="flex items-center justify-between text-xs font-semibold text-white/90 drop-shadow-md">
+      <div className="flex items-center justify-between text-xs md:text-sm font-semibold text-white/90 drop-shadow-md">
         {/* Left: Resolution & FPS badges */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 md:gap-4">
           <button
             type="button"
             onClick={() => {
@@ -64,8 +70,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             }}
             className="flex items-baseline gap-0.5 hover:text-white transition cursor-pointer"
           >
-            <span className="font-extrabold text-sm">{cameraSettings.resolution}</span>
-            <span className="text-[10px] text-zinc-400 font-medium">RES</span>
+            <span className="font-extrabold text-sm md:text-base">{cameraSettings.resolution}</span>
+            <span className="text-[10px] md:text-xs text-zinc-400 font-medium">RES</span>
           </button>
 
           <button
@@ -76,22 +82,47 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             }}
             className="flex items-baseline gap-0.5 hover:text-white transition cursor-pointer"
           >
-            <span className="font-extrabold text-sm">{cameraSettings.fps}</span>
-            <span className="text-[10px] text-zinc-400 font-medium">FPS</span>
+            <span className="font-extrabold text-sm md:text-base">{cameraSettings.fps}</span>
+            <span className="text-[10px] md:text-xs text-zinc-400 font-medium">FPS</span>
           </button>
         </div>
 
-        {/* Right: PWA Install, Flash, Mic, Grid, Settings Icons */}
-        <div className="flex items-center gap-3 text-white/85">
+        {/* Right: PWA Install, Layout Mode Toggle, Flash, Mic, Grid, Settings Icons */}
+        <div className="flex items-center gap-2.5 md:gap-3.5 text-white/85">
           {/* PWA Install Button */}
           <PWAInstallButton />
+
+          {/* Tablet / Phone Layout Toggle Button */}
+          {onToggleDeviceLayout && (
+            <button
+              type="button"
+              id="btn-toggle-layout-mode"
+              onClick={onToggleDeviceLayout}
+              className={`p-1.5 md:p-2 rounded-full transition active:scale-90 flex items-center gap-1 cursor-pointer ${
+                deviceLayoutMode === 'tablet'
+                  ? 'text-cyan-400 bg-cyan-400/20 shadow-[0_0_10px_rgba(34,211,238,0.3)]'
+                  : 'text-zinc-300 hover:text-white bg-black/40'
+              }`}
+              title={
+                deviceLayoutMode === 'tablet'
+                  ? 'Modo Tablet / Tela Cheia Ativo (Clique para alternar para moldura de Celular Reels 9:16)'
+                  : 'Modo Celular (Clique para expandir para tela cheia de Tablet)'
+              }
+            >
+              {deviceLayoutMode === 'tablet' ? (
+                <Tablet className="w-5 h-5 md:w-5.5 md:h-5.5" />
+              ) : (
+                <Smartphone className="w-5 h-5 md:w-5.5 md:h-5.5" />
+              )}
+            </button>
+          )}
 
           {/* Flash / Torch */}
           <button
             type="button"
             id="btn-toggle-flash"
             onClick={() => onUpdateCamera({ flashEnabled: !cameraSettings.flashEnabled })}
-            className={`p-1.5 rounded-full transition active:scale-90 ${
+            className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
               cameraSettings.flashEnabled ? 'text-amber-400 bg-amber-400/20' : 'hover:text-white'
             }`}
             title="Lanterna / Flash"
@@ -104,7 +135,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             type="button"
             id="btn-toggle-mic"
             onClick={() => onUpdateCamera({ micEnabled: !cameraSettings.micEnabled })}
-            className={`p-1.5 rounded-full transition active:scale-90 ${
+            className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
               cameraSettings.micEnabled ? 'text-white' : 'text-rose-400 bg-rose-400/20'
             }`}
             title="Microfone"
@@ -117,7 +148,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             type="button"
             id="btn-toggle-grid"
             onClick={() => onUpdateCamera({ gridEnabled: !cameraSettings.gridEnabled })}
-            className={`p-1.5 rounded-full transition active:scale-90 ${
+            className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
               cameraSettings.gridEnabled ? 'text-cyan-400 bg-cyan-400/20' : 'hover:text-white'
             }`}
             title="Grade de Enquadramento"
@@ -130,7 +161,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             type="button"
             id="btn-open-settings"
             onClick={onOpenSettings}
-            className="p-1.5 rounded-full hover:text-white transition active:scale-90"
+            className="p-1.5 md:p-2 rounded-full hover:text-white transition active:scale-90 cursor-pointer"
             title="Configurações"
           >
             <Settings className="w-5 h-5" />

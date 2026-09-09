@@ -181,7 +181,7 @@ export const SoundFontManagerModal: React.FC<SoundFontManagerModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto bg-zinc-900 border border-white/15 rounded-2xl shadow-2xl p-4 sm:p-5 text-white flex flex-col gap-4"
+        className="relative w-full max-w-xl md:max-w-3xl lg:max-w-4xl max-h-[90vh] overflow-y-auto bg-zinc-900 border border-white/15 rounded-2xl shadow-2xl p-4 sm:p-5 text-white flex flex-col gap-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
