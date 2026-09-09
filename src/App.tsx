@@ -43,7 +43,7 @@ export default function App() {
     gridEnabled: false,
     micEnabled: true,
     flashEnabled: false,
-    recordingMode: 'direct', // Default to Direct (Hardware 0% Lag) for crystal clear smooth recording
+    recordingMode: 'overlay', // Default to Overlay so keyboard, animated keys and chords are burned into the recorded video
   });
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
@@ -327,6 +327,12 @@ export default function App() {
 
       const filterCss = getCombinedFilterStyle(activeFilter, filterAdjustments);
       const keyboardElem = document.getElementById('virtual-piano-keyboard');
+
+      // Ensure audio context is running for perfect synchronization
+      const audioCtx = audioSynth.getAudioContext();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
 
       // Audio tracks from Synth & Mic
       const audioTracks: MediaStreamTrack[] = [];

@@ -158,19 +158,34 @@ export class VideoRecorderManager {
         );
 
         if (whiteKeyButtons.length > 0) {
-          const kbRect = keyboardElement.getBoundingClientRect();
-          const actualAspect =
-            kbRect.width > 0 && kbRect.height > 0
-              ? kbRect.width / kbRect.height
-              : whiteKeyButtons.length >= 35
-              ? 7.6
-              : whiteKeyButtons.length >= 25
-              ? 6.2
-              : 4.8;
-          kbWidth = width * 0.88;
-          kbHeight = kbWidth / actualAspect;
-          kbX = (width - kbWidth) / 2;
-          kbY = height * 0.28;
+          // Precise relative positioning based on camera viewport
+          const viewport = document.getElementById('camera-viewport-container') || videoElement.parentElement;
+          if (viewport) {
+            const vRect = viewport.getBoundingClientRect();
+            const kRect = keyboardElement.getBoundingClientRect();
+            if (vRect.width > 0 && vRect.height > 0 && kRect.width > 0) {
+              kbWidth = (kRect.width / vRect.width) * width;
+              kbHeight = (kRect.height / vRect.height) * height;
+              kbX = ((kRect.left - vRect.left) / vRect.width) * width;
+              kbY = ((kRect.top - vRect.top) / vRect.height) * height;
+            }
+          }
+
+          if (kbWidth <= 0 || kbHeight <= 0) {
+            const kbRect = keyboardElement.getBoundingClientRect();
+            const actualAspect =
+              kbRect.width > 0 && kbRect.height > 0
+                ? kbRect.width / kbRect.height
+                : whiteKeyButtons.length >= 35
+                ? 7.6
+                : whiteKeyButtons.length >= 25
+                ? 6.2
+                : 4.8;
+            kbWidth = width * 0.92;
+            kbHeight = kbWidth / actualAspect;
+            kbX = (width - kbWidth) / 2;
+            kbY = height * 0.28;
+          }
 
           const numWhites = whiteKeyButtons.length;
           const keyW = kbWidth / numWhites;
@@ -205,24 +220,20 @@ export class VideoRecorderManager {
       }
 
       // Pre-calculate chord typography
-      const chordY = height * 0.22;
-      const chordFontSize = Math.round(width * 0.075);
-      const chordFont = `800 ${chordFontSize}px Outfit, sans-serif`;
+      const chordFontSize = Math.max(16, Math.round(width * 0.065));
+      const chordFont = `800 ${chordFontSize}px Outfit, -apple-system, sans-serif`;
+      const chordY = kbY > 0 ? Math.max(chordFontSize + 12, kbY - chordFontSize * 0.75) : height * 0.22;
 
       // Strict 30 FPS Frame Throttling:
-      // Prevents 90Hz/120Hz tablets from overwhelming GPU and dropping frames!
       const TARGET_FPS = 30;
       const FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // ~33.3ms
       let lastDrawTime = 0;
 
-      // On Android Chromium, ctx.filter with drawImage(video) causes Skia GPU memory leaks
-      // and CPU software rasterization fallback after ~5 seconds.
-      // We safely apply ctx.filter ONLY on iOS and desktop where Metal/DirectX runs it hardware-accelerated.
-      const useCtxFilter = !isAndroid && filterString && filterString !== 'none';
-
       const render = (now: number) => {
-        if (!this.isRecording) return;
-        this.animFrameId = requestAnimationFrame(render);
+        if (!this.isRecording && this.animFrameId === null) return;
+        if (this.isRecording) {
+          this.animFrameId = requestAnimationFrame(render);
+        }
 
         // Throttle strictly to 30 FPS
         if (now - lastDrawTime < FRAME_INTERVAL_MS - 2) {
@@ -231,33 +242,42 @@ export class VideoRecorderManager {
         lastDrawTime = now;
 
         // 1. Draw camera video with direct GPU acceleration
-        if (useCtxFilter) {
-          ctx.filter = filterString;
+        const isMirrored = videoElement.classList.contains('scale-x-[-1]') || (videoElement.style.transform && videoElement.style.transform.includes('scaleX(-1)'));
+        if (isMirrored) {
+          ctx.save();
+          ctx.translate(width, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(videoElement, 0, 0, width, height);
+          ctx.restore();
         } else {
-          ctx.filter = 'none';
-        }
-
-        ctx.drawImage(videoElement, 0, 0, width, height);
-
-        // Reset filter for overlays
-        if (useCtxFilter) {
-          ctx.filter = 'none';
+          ctx.drawImage(videoElement, 0, 0, width, height);
         }
 
         // 2. Draw live chord banner if chord exists
         const currentChord = getChord();
         if (currentChord) {
           ctx.save();
+          ctx.font = chordFont;
+          const textMetrics = ctx.measureText(currentChord);
+          const pillPaddingX = 20;
+          const pillW = textMetrics.width + pillPaddingX * 2;
+          const pillH = chordFontSize * 1.35;
+          const pillX = (width - pillW) / 2;
+          const pillY = chordY - pillH / 2;
+
+          // Translucent dark badge for high readability
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+          if (typeof ctx.roundRect === 'function') {
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
+            ctx.fill();
+          } else {
+            ctx.fillRect(pillX, pillY, pillW, pillH);
+          }
+
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = chordFont;
-
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-          ctx.shadowBlur = 18;
-          ctx.shadowOffsetX = 0;
-          ctx.shadowOffsetY = 3;
-
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = '#fbbf24'; // Amber 400
           ctx.fillText(currentChord, width / 2, chordY);
           ctx.restore();
         }
@@ -276,10 +296,19 @@ export class VideoRecorderManager {
             const key = cachedWhiteKeys[i];
             const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
 
-            ctx.fillStyle = isKeyActive ? activeColor : '#ffffff';
-            ctx.fillRect(key.x, key.y, key.w, key.h);
+            if (isKeyActive) {
+              ctx.save();
+              ctx.shadowColor = activeColor;
+              ctx.shadowBlur = 10;
+              ctx.fillStyle = activeColor;
+              ctx.fillRect(key.x, key.y, key.w, key.h);
+              ctx.restore();
+            } else {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(key.x, key.y, key.w, key.h);
+            }
 
-            // Key divider
+            // Key divider line
             ctx.strokeStyle = '#d1d5db';
             ctx.lineWidth = 1;
             ctx.beginPath();
@@ -293,14 +322,22 @@ export class VideoRecorderManager {
             const key = cachedBlackKeys[i];
             const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
 
-            ctx.fillStyle = isKeyActive ? activeDarkColor : '#18181b';
-            ctx.fillRect(key.x, key.y, key.w, key.h);
+            if (isKeyActive) {
+              ctx.save();
+              ctx.shadowColor = activeColor;
+              ctx.shadowBlur = 8;
+              ctx.fillStyle = activeDarkColor;
+              ctx.fillRect(key.x, key.y, key.w, key.h);
+              ctx.restore();
+            } else {
+              ctx.fillStyle = '#18181b';
+              ctx.fillRect(key.x, key.y, key.w, key.h);
+            }
           }
         }
       };
 
       // Determine video track source:
-      // If direct mode is enabled, pull directly from raw videoElement.srcObject for 0% CPU overhead!
       let videoTracksToRecord: MediaStreamTrack[] = [];
       const isDirectMode = recordingMode === 'direct' && videoElement.srcObject instanceof MediaStream;
 
@@ -309,33 +346,32 @@ export class VideoRecorderManager {
         videoTracksToRecord = rawStream.getVideoTracks();
       }
 
-      // Safe fallback: if direct tracks were empty or overlay mode is requested
+      // Safe fallback / overlay mode: capture rendered composite canvas
       if (videoTracksToRecord.length === 0) {
         const canvasStream = canvas.captureStream(30);
         videoTracksToRecord = canvasStream.getVideoTracks();
+      }
+
+      // CRITICAL FOR AUDIO-VIDEO SYNC:
+      // Prime canvas with a first frame synchronously BEFORE MediaRecorder starts!
+      render(performance.now());
+      if (videoTracksToRecord[0] && (videoTracksToRecord[0] as any).requestFrame) {
+        try {
+          (videoTracksToRecord[0] as any).requestFrame();
+        } catch {
+          // ignore
+        }
       }
 
       // Create mixed stream with audio
       const combinedTracks: MediaStreamTrack[] = [...videoTracksToRecord, ...audioTracks];
       const combinedStream = new MediaStream(combinedTracks);
 
-      // Codec selection: Prioritize hardware-accelerated H.264 / MP4 (supported in Android 10+ Chrome)
+      // Codec selection: Prioritize WebM on Android for 100% audio sync
       const mimeTypes = isIOS
         ? [
             'video/mp4;codecs=avc1',
             'video/mp4',
-            'video/webm;codecs=vp8,opus',
-            'video/webm',
-          ]
-        : isAndroid
-        ? [
-            'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-            'video/mp4;codecs=avc1',
-            'video/mp4',
-            'video/webm;codecs=h264,opus',
-            'video/webm;codecs=h264',
-            'video/webm;codecs=vp8,opus',
-            'video/webm;codecs=vp8',
             'video/webm',
           ]
         : [
@@ -354,10 +390,10 @@ export class VideoRecorderManager {
         }
       }
 
-      // Configure MediaRecorder with crisp 4.0 Mbps bitrate for clear camera quality
+      // Configure MediaRecorder with smooth bitrate
       const options: MediaRecorderOptions = {
         ...(selectedMime ? { mimeType: selectedMime } : {}),
-        videoBitsPerSecond: 4000000,
+        videoBitsPerSecond: isAndroid ? 2500000 : 3500000,
       };
 
       this.mediaRecorder = new MediaRecorder(combinedStream, options);
@@ -372,22 +408,16 @@ export class VideoRecorderManager {
         this.finishRecording(selectedMime || 'video/webm');
       };
 
-      // Critical Android Fix:
-      // Calling start() without timeslice on Android allows MediaCodec to encode continuous NAL units
-      // without forcing buffer flushes every second, preventing the 5-second lag!
-      if (isAndroid) {
-        this.mediaRecorder.start();
-      } else {
-        this.mediaRecorder.start(1000);
-      }
-
+      // Set recording state and start loop before triggering recorder
       this.isRecording = true;
       this.startTime = Date.now();
 
-      // Start animation loop only if overlay composition is needed
       if (!isDirectMode) {
         this.animFrameId = requestAnimationFrame(render);
       }
+
+      // Flushed every 200ms ensures audio and video chunks are tightly interleaved from frame 0
+      this.mediaRecorder.start(200);
 
       // Start duration timer
       this.timerInterval = window.setInterval(() => {
