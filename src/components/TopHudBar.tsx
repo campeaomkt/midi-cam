@@ -1,5 +1,5 @@
 import React from 'react';
-import { CameraSettings, KeyboardSettings, MidiDevice } from '../types';
+import { CameraSettings, KeyboardSettings, MidiDevice, WifiSyncStatus } from '../types';
 import {
   Zap,
   ZapOff,
@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Music,
+  Wifi,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -23,6 +24,8 @@ interface TopHudBarProps {
   isMidiConnected: boolean;
   activeSoundFontName?: string;
   isSustainActive?: boolean;
+  wifiSyncStatus?: WifiSyncStatus;
+  onOpenWifiSync?: () => void;
   onToggleSustain?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
@@ -40,6 +43,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   isMidiConnected,
   activeSoundFontName,
   isSustainActive = false,
+  wifiSyncStatus,
+  onOpenWifiSync,
   onToggleSustain,
   onUpdateCamera,
   onUpdateKeyboard,
@@ -192,7 +197,38 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Wi-Fi Sync Button (PC ⇄ Celular) */}
+          {onOpenWifiSync && (
+            <button
+              type="button"
+              id="btn-wifi-sync"
+              onClick={onOpenWifiSync}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium backdrop-blur-md border transition cursor-pointer active:scale-95 ${
+                wifiSyncStatus?.isConnected
+                  ? 'bg-cyan-950/80 border-cyan-500/50 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
+                  : wifiSyncStatus?.mode === 'host'
+                  ? 'bg-amber-950/80 border-amber-500/40 text-amber-300'
+                  : 'bg-black/50 border-white/15 text-zinc-300 hover:text-white hover:border-cyan-400/40'
+              }`}
+              title="Sincronização Wi-Fi (PC ⇄ Celular)"
+            >
+              <Wifi className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
+              {wifiSyncStatus?.isConnected ? (
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
+                  <span className="font-mono text-[11px] font-bold">
+                    {wifiSyncStatus.mode === 'host' ? 'Host PC' : `${wifiSyncStatus.latencyMs ?? 4}ms`}
+                  </span>
+                </span>
+              ) : wifiSyncStatus?.mode === 'host' ? (
+                <span className="font-mono text-[11px] font-bold text-cyan-300">{wifiSyncStatus.roomCode}</span>
+              ) : (
+                <span className="whitespace-nowrap text-[11px] font-semibold">Wi-Fi PC</span>
+              )}
+            </button>
+          )}
+
           {/* MIDI Connection Status Badge */}
           <button
             type="button"

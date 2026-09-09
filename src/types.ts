@@ -93,3 +93,17 @@ export interface CameraSettings {
   micEnabled: boolean;
   flashEnabled: boolean;
 }
+
+export type WifiSyncMode = 'idle' | 'host' | 'client';
+
+export interface WifiSyncStatus {
+  mode: WifiSyncMode;
+  roomCode: string | null;
+  isConnected: boolean;
+  isConnecting: boolean;
+  peerCount: number;
+  hostDeviceName?: string;
+  latencyMs: number | null;
+  error: string | null;
+  lastActiveTimestamp?: number;
+}

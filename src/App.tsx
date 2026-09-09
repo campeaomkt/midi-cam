@@ -6,6 +6,7 @@ import {
   FilterType,
   MidiDevice,
   VideoRecording,
+  WifiSyncStatus,
 } from './types';
 import { FILTER_PRESETS, getCombinedFilterStyle } from './utils/filterPresets';
 import { detectChord } from './utils/chordDetector';
@@ -25,10 +26,12 @@ import { FilterSettingsDrawer } from './components/FilterSettingsDrawer';
 import { SettingsModal } from './components/SettingsModal';
 import { RecordedVideosModal } from './components/RecordedVideosModal';
 import { SoundFontManagerModal } from './components/SoundFontManagerModal';
+import { WifiMidiSyncModal } from './components/WifiMidiSyncModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { sf2Engine } from './utils/sf2Engine';
 import { loadSoundFontFromStorage } from './utils/sf2Storage';
 import { timbreEngine } from './utils/timbreEngine';
+import { wifiMidiBridge } from './utils/wifiMidiBridge';
 
 export default function App() {
   // Camera Configuration State
@@ -96,9 +99,38 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isSoundFontOpen, setIsSoundFontOpen] = useState(false);
+  const [isWifiSyncOpen, setIsWifiSyncOpen] = useState(false);
+  const [wifiSyncStatus, setWifiSyncStatus] = useState<WifiSyncStatus>(() =>
+    wifiMidiBridge.getStatus()
+  );
   const [activeSoundFontName, setActiveSoundFontName] = useState<string>(() =>
     timbreEngine.getActiveTimbreName()
   );
+
+  // Subscribe to Wi-Fi MIDI Sync Bridge
+  useEffect(() => {
+    const unsub = wifiMidiBridge.subscribe((status) => {
+      setWifiSyncStatus(status);
+    });
+    return unsub;
+  }, []);
+
+  // Auto-connect if URL has ?sync=CODE (from QR Code scan on mobile)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const syncCode = params.get('sync');
+      if (syncCode) {
+        wifiMidiBridge.connectClient(syncCode).then((res) => {
+          if (res.success) {
+            setIsWifiSyncOpen(true);
+          }
+        });
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+    }
+  }, []);
 
   // Video Element Ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -420,6 +452,8 @@ export default function App() {
             isMidiConnected={isMidiConnected}
             activeSoundFontName={activeSoundFontName}
             isSustainActive={isSustainActive}
+            wifiSyncStatus={wifiSyncStatus}
+            onOpenWifiSync={() => setIsWifiSyncOpen(true)}
             onToggleSustain={handleToggleSustain}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
@@ -480,10 +514,22 @@ export default function App() {
         midiDevices={midiDevices}
         isMidiConnected={isMidiConnected}
         activeSoundFontName={activeSoundFontName}
+        wifiSyncStatus={wifiSyncStatus}
+        onOpenWifiSync={() => {
+          setIsSettingsOpen(false);
+          setIsWifiSyncOpen(true);
+        }}
         onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
         onRequestMidi={handleRequestMidi}
         onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
         onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
+      />
+
+      {/* Wi-Fi MIDI Sync Modal (PC ⇄ Celular & Guia Tauri) */}
+      <WifiMidiSyncModal
+        isOpen={isWifiSyncOpen}
+        onClose={() => setIsWifiSyncOpen(false)}
+        onRequestMidi={handleRequestMidi}
       />
 
       {/* SoundFont 2 (.sf2) Manager Modal */}

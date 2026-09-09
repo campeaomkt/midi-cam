@@ -1,5 +1,5 @@
 import React, { useId, useState } from 'react';
-import { CameraSettings, KeyboardSettings, KeyCount, MidiDevice } from '../types';
+import { CameraSettings, KeyboardSettings, KeyCount, MidiDevice, WifiSyncStatus } from '../types';
 import {
   X,
   Cable,
@@ -17,6 +17,9 @@ import {
   Sparkles,
   Smartphone,
   HelpCircle,
+  Wifi,
+  ArrowRight,
+  Zap,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -34,6 +37,8 @@ interface SettingsModalProps {
   midiDevices: MidiDevice[];
   isMidiConnected: boolean;
   activeSoundFontName?: string;
+  wifiSyncStatus?: WifiSyncStatus;
+  onOpenWifiSync?: () => void;
   onOpenSoundFontModal?: () => void;
   onRequestMidi: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
@@ -48,6 +53,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   midiDevices,
   isMidiConnected,
   activeSoundFontName,
+  wifiSyncStatus,
+  onOpenWifiSync,
   onOpenSoundFontModal,
   onRequestMidi,
   onUpdateCamera,
@@ -133,6 +140,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Section 1.5: Wi-Fi MIDI Sync (PC ⇄ Celular) */}
+        {onOpenWifiSync && (
+          <div className="flex flex-col gap-2.5 p-3.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400">
+                  <Wifi className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                    Sincronização Wi-Fi (PC ⇄ Celular)
+                    <span className="text-[9px] uppercase px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-bold">
+                      Sem Cabos
+                    </span>
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Toque no PC ou DAW e receba as notas no celular
+                  </p>
+                </div>
+              </div>
+
+              {wifiSyncStatus?.isConnected ? (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                  <Zap className="w-2.5 h-2.5" />
+                  {wifiSyncStatus.latencyMs !== null ? `${wifiSyncStatus.latencyMs}ms` : 'Ativo'}
+                </span>
+              ) : wifiSyncStatus?.mode === 'host' ? (
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
+                  {wifiSyncStatus.roomCode}
+                </span>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={onOpenWifiSync}
+              className="w-full py-2 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+            >
+              <span>
+                {wifiSyncStatus?.isConnected
+                  ? `Conectado ao ${wifiSyncStatus.hostDeviceName || 'PC'} (Gerenciar)`
+                  : wifiSyncStatus?.mode === 'host'
+                  ? 'Transmissor do PC Ativo (Ver QR Code)'
+                  : 'Parear com o Computador / Ver QR Code'}
+              </span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Section 2: Audio Synthesis & Volume */}
         <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
