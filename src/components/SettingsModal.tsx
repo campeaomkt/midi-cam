@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useId, useState, useEffect } from 'react';
 import { CameraSettings, KeyboardSettings, KeyCount, MidiDevice, WifiSyncStatus } from '../types';
 import {
   X,
@@ -22,6 +22,9 @@ import {
   Zap,
   Languages,
   Sliders,
+  Mic,
+  MicOff,
+  ShieldCheck,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -30,6 +33,7 @@ import {
   KEYBOARD_COLOR_PALETTE,
   getEffectiveActiveColor,
 } from '../utils/keyboardColor';
+import { audioSynth } from '../utils/audioSynth';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -66,6 +70,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const colorInputId = useId();
   const [isIOSGuideOpen, setIsIOSGuideOpen] = useState(false);
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [testMicLevel, setTestMicLevel] = useState(0);
+
+  // Live microphone test animation and VU level reader
+  useEffect(() => {
+    let animId: number;
+    let active = true;
+
+    if (isTestingMic && isOpen) {
+      audioSynth
+        .enableMicrophone(cameraSettings.micVolume ?? 1.0)
+        .then((success) => {
+          if (!success && active) {
+            setIsTestingMic(false);
+          }
+        });
+
+      const tick = () => {
+        if (!active) return;
+        setTestMicLevel(audioSynth.getMicLevel());
+        animId = requestAnimationFrame(tick);
+      };
+      animId = requestAnimationFrame(tick);
+    } else {
+      setTestMicLevel(0);
+    }
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(animId);
+    };
+  }, [isTestingMic, isOpen, cameraSettings.micVolume]);
+
+  // Clean up test when modal closes
+  useEffect(() => {
+    if (!isOpen && isTestingMic) {
+      audioSynth.disableMicrophone();
+      setIsTestingMic(false);
+    }
+  }, [isOpen, isTestingMic]);
 
   if (!isOpen) return null;
 
@@ -370,6 +414,178 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Section 2c: Phone Microphone + Timbre Dual Audio Recording */}
+        <div
+          id="setting-audio-mic-timbre-section"
+          className="flex flex-col gap-3 p-3.5 rounded-xl bg-gradient-to-br from-zinc-800/90 to-zinc-900/95 border border-emerald-500/30 shadow-lg"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`p-2 rounded-xl border transition ${
+                  cameraSettings.micEnabled
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                    : 'bg-zinc-800 text-zinc-400 border-white/10'
+                }`}
+              >
+                {cameraSettings.micEnabled ? (
+                  <Mic className="w-5 h-5 animate-pulse" />
+                ) : (
+                  <MicOff className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">
+                    Gravar Mic do Celular + Som do Timbre
+                  </h4>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      cameraSettings.micEnabled
+                        ? 'bg-emerald-400 text-black shadow'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {cameraSettings.micEnabled ? 'Ativo' : 'Desativado'}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-300">
+                  Grava sua voz / fala pelo microfone do celular mixado junto com o som do timbre no vídeo
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              id="btn-toggle-mic-recording-setting"
+              onClick={() => onUpdateCamera({ micEnabled: !cameraSettings.micEnabled })}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer active:scale-95 ${
+                cameraSettings.micEnabled
+                  ? 'bg-emerald-400 text-black border-emerald-300 shadow-md ring-2 ring-emerald-400/30'
+                  : 'bg-zinc-800 text-zinc-300 border-white/10 hover:text-white'
+              }`}
+            >
+              {cameraSettings.micEnabled ? 'Ligado' : 'Desligado'}
+            </button>
+          </div>
+
+          {cameraSettings.micEnabled ? (
+            <div className="flex flex-col gap-3 pt-2 border-t border-white/10">
+              {/* Mic Gain Slider */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-300 font-semibold">
+                    Volume do Microfone (Ganho da Voz na Gravação)
+                  </span>
+                  <span className="font-mono font-bold text-emerald-400">
+                    {Math.round((cameraSettings.micVolume ?? 1.0) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1.5"
+                  step="0.05"
+                  value={cameraSettings.micVolume ?? 1.0}
+                  onChange={(e) => onUpdateCamera({ micVolume: parseFloat(e.target.value) })}
+                  className="w-full accent-emerald-400 h-2 bg-zinc-900 rounded-lg cursor-pointer"
+                />
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  {[
+                    { label: '50% (Baixo)', val: 0.5 },
+                    { label: '80% (Suave)', val: 0.8 },
+                    { label: '100% (Padrão)', val: 1.0 },
+                    { label: '130% (Forte)', val: 1.3 },
+                  ].map((preset) => {
+                    const isCur = Math.abs((cameraSettings.micVolume ?? 1.0) - preset.val) < 0.04;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => onUpdateCamera({ micVolume: preset.val })}
+                        className={`py-1 rounded text-[10px] font-semibold transition cursor-pointer ${
+                          isCur
+                            ? 'bg-emerald-400 text-black font-bold shadow'
+                            : 'bg-zinc-800/80 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Real-Time Microphone Test & VU Meter */}
+              <div className="p-3 rounded-xl bg-black/40 border border-emerald-500/20 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-zinc-200">
+                      Teste do Microfone em Tempo Real
+                    </span>
+                    {isTestingMic && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-mono animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Ouvindo...
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isTestingMic) {
+                        audioSynth.disableMicrophone();
+                        setIsTestingMic(false);
+                      } else {
+                        setIsTestingMic(true);
+                      }
+                    }}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer active:scale-95 ${
+                      isTestingMic
+                        ? 'bg-rose-500/30 text-rose-300 border border-rose-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
+                    }`}
+                  >
+                    {isTestingMic ? 'Parar Teste' : 'Testar Captação'}
+                  </button>
+                </div>
+
+                {/* Animated VU Meter Bar */}
+                <div className="w-full h-3 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-white/10 flex items-center">
+                  <div
+                    className="h-full rounded-full transition-all duration-75 bg-gradient-to-r from-emerald-500 via-yellow-400 to-rose-500"
+                    style={{
+                      width: `${Math.min(100, Math.max(isTestingMic ? 4 : 0, testMicLevel * 100))}%`,
+                    }}
+                  />
+                </div>
+                {isTestingMic ? (
+                  <p className="text-[10px] text-zinc-400">
+                    Fale próximo ao celular: a barra colorida deve vibrar com a sua voz!
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-zinc-500">
+                    Toque em &quot;Testar Captação&quot; para testar a captação do microfone do seu telefone agora.
+                  </p>
+                )}
+              </div>
+
+              {/* Anti-Feedback Guarantee Note */}
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-200">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] leading-relaxed text-zinc-300">
+                  <strong className="text-emerald-300 block">Isolamento Anti-Microfonia Ativo:</strong>
+                  Sua voz é gravada <span className="text-white font-medium">somente no arquivo de vídeo</span>. O microfone não sai nos alto-falantes do telefone para evitar microfonia (apito acústico).
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] text-zinc-400 bg-zinc-900/50 p-2.5 rounded-lg border border-white/5">
+              💡 Quando desativado, o vídeo gravará <strong className="text-zinc-200">apenas o som digital do timbre/sintetizador</strong>, sem ruídos externos de ambiente ou conversas.
             </div>
           )}
         </div>

@@ -96,9 +96,12 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         {/* Center: Giant Red Shutter Button with Recording Indicator */}
         <div className="flex flex-col items-center">
           {isRecording && (
-            <div className="flex items-center gap-1.5 mb-2 bg-rose-600/90 text-white font-mono text-xs md:text-sm font-bold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full shadow-lg animate-pulse">
+            <div className="flex items-center gap-1.5 mb-2 bg-rose-600/90 text-white font-mono text-xs md:text-sm font-bold px-3 py-1 rounded-full shadow-lg animate-pulse">
               <span className="w-2 h-2 rounded-full bg-white animate-ping" />
               <span>REC {formatTime(recordingTimeSeconds)}</span>
+              <span className="text-[10px] font-sans font-bold bg-black/40 px-2 py-0.5 rounded-full text-zinc-100 flex items-center gap-1 ml-0.5">
+                {cameraSettings.micEnabled ? '🎤 Mic + 🎹 Timbre' : '🎹 Apenas Timbre'}
+              </span>
             </div>
           )}
 

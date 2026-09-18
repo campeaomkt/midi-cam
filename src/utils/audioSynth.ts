@@ -16,6 +16,14 @@ class AudioSynthManager {
   private isMuted: boolean = false;
   private volume: number = 0.7;
 
+  // Phone Microphone Recording Mixed with Timbre Sound
+  private micStream: MediaStream | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
+  private micGain: GainNode | null = null;
+  private micAnalyser: AnalyserNode | null = null;
+  private isMicEnabled: boolean = false;
+  private micVolume: number = 1.0;
+
   constructor() {
     // Setup automatic auto-unlock on first user tap/pointerdown
     if (typeof window !== 'undefined') {
@@ -65,6 +73,119 @@ class AudioSynthManager {
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime, 0.05);
     }
+  }
+
+  /**
+   * Enables the phone microphone to be mixed directly with the timbre sound into the video recording stream.
+   * ANTI-FEEDBACK PROTECTION: The microphone audio is connected EXCLUSIVELY to streamDestination
+   * and NEVER to this.ctx.destination (speakers), preventing any acoustic feedback loop / howl.
+   */
+  public async enableMicrophone(volume: number = 1.0): Promise<boolean> {
+    this.initContext();
+    if (!this.ctx || !this.streamDestination) return false;
+
+    try {
+      this.micVolume = Math.max(0, Math.min(2, volume));
+
+      // Request phone microphone with noise suppression and echo cancellation
+      if (!this.micStream || this.micStream.getAudioTracks().every((t) => t.readyState === 'ended')) {
+        this.micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      }
+
+      if (!this.micGain) {
+        this.micGain = this.ctx.createGain();
+        // CONNECT ONLY TO streamDestination (recording output) - NEVER to speakers!
+        this.micGain.connect(this.streamDestination);
+      }
+      this.micGain.gain.setValueAtTime(this.micVolume, this.ctx.currentTime);
+
+      if (!this.micAnalyser) {
+        this.micAnalyser = this.ctx.createAnalyser();
+        this.micAnalyser.fftSize = 256;
+        this.micAnalyser.smoothingTimeConstant = 0.4;
+      }
+
+      if (!this.micSource && this.micStream) {
+        this.micSource = this.ctx.createMediaStreamSource(this.micStream);
+        this.micSource.connect(this.micGain);
+        this.micSource.connect(this.micAnalyser);
+      }
+
+      this.isMicEnabled = true;
+      return true;
+    } catch (err) {
+      console.warn('Microphone access denied or unavailable:', err);
+      this.isMicEnabled = false;
+      return false;
+    }
+  }
+
+  /**
+   * Disconnects and releases the microphone tracks (restoring phone privacy indicator to inactive).
+   */
+  public disableMicrophone() {
+    if (this.micSource) {
+      try {
+        this.micSource.disconnect();
+      } catch {}
+      this.micSource = null;
+    }
+    if (this.micGain) {
+      try {
+        this.micGain.disconnect();
+      } catch {}
+      this.micGain = null;
+    }
+    if (this.micAnalyser) {
+      try {
+        this.micAnalyser.disconnect();
+      } catch {}
+      this.micAnalyser = null;
+    }
+    if (this.micStream) {
+      this.micStream.getTracks().forEach((t) => t.stop());
+      this.micStream = null;
+    }
+    this.isMicEnabled = false;
+  }
+
+  /**
+   * Updates microphone gain volume in real-time
+   */
+  public setMicVolume(vol: number) {
+    this.micVolume = Math.max(0, Math.min(2, vol));
+    if (this.micGain && this.ctx) {
+      this.micGain.gain.setTargetAtTime(this.micVolume, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  public getMicVolume(): number {
+    return this.micVolume;
+  }
+
+  public getIsMicEnabled(): boolean {
+    return this.isMicEnabled;
+  }
+
+  /**
+   * Returns current real-time microphone RMS volume level (0.0 to 1.0) for VU Meters
+   */
+  public getMicLevel(): number {
+    if (!this.micAnalyser) return 0;
+    const data = new Uint8Array(this.micAnalyser.frequencyBinCount);
+    this.micAnalyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i];
+    }
+    const avg = sum / data.length;
+    return Math.min(1, (avg / 128) * 1.5);
   }
 
   public startNote(midiNumber: number, velocity: number = 90) {

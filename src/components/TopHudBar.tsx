@@ -103,17 +103,30 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             {cameraSettings.flashEnabled ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
           </button>
 
-          {/* Microphone */}
+          {/* Microphone + Timbre Dual Audio Toggle */}
           <button
             type="button"
             id="btn-toggle-mic"
             onClick={() => onUpdateCamera({ micEnabled: !cameraSettings.micEnabled })}
-            className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
-              cameraSettings.micEnabled ? 'text-white' : 'text-rose-400 bg-rose-400/20'
+            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-full transition active:scale-90 cursor-pointer flex items-center gap-1.5 ${
+              cameraSettings.micEnabled
+                ? 'text-emerald-300 bg-emerald-500/25 border border-emerald-400/40 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                : 'text-zinc-400 bg-zinc-800/60 border border-white/10 hover:text-white'
             }`}
-            title="Microfone"
+            title={
+              cameraSettings.micEnabled
+                ? 'Gravando: Microfone do Telefone + Som do Timbre juntos (Clique para desativar mic)'
+                : 'Gravando: Apenas Som do Timbre (Microfone desligado - Clique para ativar)'
+            }
           >
-            {cameraSettings.micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+            {cameraSettings.micEnabled ? (
+              <Mic className="w-4 h-4 text-emerald-400 animate-pulse" />
+            ) : (
+              <MicOff className="w-4 h-4 text-zinc-400" />
+            )}
+            <span className="text-[10px] font-bold tracking-tight">
+              {cameraSettings.micEnabled ? 'Mic+Timbre' : 'Só Timbre'}
+            </span>
           </button>
 
           {/* Grid lines */}
