@@ -20,6 +20,8 @@ import {
   Wifi,
   ArrowRight,
   Zap,
+  Languages,
+  Sliders,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -40,6 +42,7 @@ interface SettingsModalProps {
   wifiSyncStatus?: WifiSyncStatus;
   onOpenWifiSync?: () => void;
   onOpenSoundFontModal?: () => void;
+  onOpenAiDubbing?: () => void;
   onRequestMidi: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
@@ -56,6 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   wifiSyncStatus,
   onOpenWifiSync,
   onOpenSoundFontModal,
+  onOpenAiDubbing,
   onRequestMidi,
   onUpdateCamera,
   onUpdateKeyboard,
@@ -190,6 +194,94 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
         )}
+
+        {/* Section 1.8: AI Dubbing & Spanish Translation (OpenAI) */}
+        <div className="flex flex-col gap-3 p-4 rounded-xl bg-gradient-to-r from-emerald-950/40 via-cyan-950/30 to-zinc-900 border border-emerald-500/40 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-400 text-black shadow-md">
+                <Languages className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+                  <span>Dublagem IA para Espanhol</span>
+                  <span className="text-[10px] uppercase px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 font-mono font-bold border border-emerald-400/30">
+                    OpenAI
+                  </span>
+                </h4>
+                <p className="text-xs text-zinc-400">
+                  Configure sua OpenAI API Key para transcrever, traduzir e dublar criativos
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Direct API Key Input Inside Settings */}
+          <div className="flex flex-col gap-1.5 bg-black/60 p-3 rounded-xl border border-white/10">
+            <label className="text-xs text-zinc-300 font-semibold flex items-center justify-between">
+              <span>Chave de API da OpenAI (sk-...)</span>
+              <span className="text-[10px] text-emerald-400 font-medium">Salva no seu navegador</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                placeholder="sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx"
+                defaultValue={(() => {
+                  try {
+                    const raw = localStorage.getItem('midicam_openai_config');
+                    if (raw) return JSON.parse(raw).apiKey || '';
+                  } catch {}
+                  return '';
+                })()}
+                id="openai-api-key-settings-input"
+                className="flex-1 bg-zinc-900 border border-white/20 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400 transition"
+              />
+              <button
+                type="button"
+                id="btn-save-openai-key-settings"
+                onClick={(e) => {
+                  const input = document.getElementById('openai-api-key-settings-input') as HTMLInputElement;
+                  if (input) {
+                    const val = input.value.trim();
+                    try {
+                      const raw = localStorage.getItem('midicam_openai_config');
+                      const parsed = raw ? JSON.parse(raw) : {};
+                      localStorage.setItem(
+                        'midicam_openai_config',
+                        JSON.stringify({
+                          apiKey: val,
+                          voice: parsed.voice || 'onyx',
+                          model: parsed.model || 'tts-1-hd',
+                        })
+                      );
+                      alert('Chave OpenAI salva com sucesso!');
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-black font-extrabold text-xs transition cursor-pointer active:scale-95 shrink-0 shadow"
+              >
+                Salvar Chave
+              </button>
+            </div>
+          </div>
+
+          {onOpenAiDubbing && (
+            <button
+              type="button"
+              id="btn-open-dubbing-studio-from-settings"
+              onClick={() => {
+                onClose();
+                onOpenAiDubbing();
+              }}
+              className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-between transition cursor-pointer"
+            >
+              <span>Abrir Estúdio de Dublagem IA & Ajuste de Copy</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
 
         {/* Section 2: Audio Synthesis & Volume */}
         <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
@@ -449,6 +541,103 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Section: Modelo Visual do Teclado */}
+        <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-amber-400" />
+              <div>
+                <h4 className="text-sm font-bold">Modelo Visual do Teclado</h4>
+                <p className="text-xs text-zinc-400">
+                  Acabamento físico, relevo 3D e face das teclas
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
+              {(keyboardSettings.visualModel || 'realistic-3d') === 'realistic-3d'
+                ? 'Acústico 3D (Lábio Chanfrado)'
+                : (keyboardSettings.visualModel === 'realistic-gloss')
+                ? 'Gloss Esmaltado'
+                : 'Minimal Flat'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+            {[
+              {
+                id: 'realistic-3d',
+                title: 'Acústico 3D Realista',
+                desc: 'Face frontal chanfrada em cada tecla, feltro vermelho e marfim acetinado',
+                badge: 'Recomendado',
+              },
+              {
+                id: 'realistic-gloss',
+                title: 'Gloss Esmaltado',
+                desc: 'Acabamento brilhante com reflexo e curvatura suave',
+                badge: 'Moderno',
+              },
+              {
+                id: 'flat-minimal',
+                title: 'Minimal 2D',
+                desc: 'Estilo plano tradicional sem relevo',
+                badge: 'Clássico',
+              },
+            ].map((model) => {
+              const isSelected = (keyboardSettings.visualModel || 'realistic-3d') === model.id;
+              return (
+                <button
+                  key={model.id}
+                  type="button"
+                  onClick={() => onUpdateKeyboard({ visualModel: model.id as any })}
+                  className={'relative p-3 rounded-xl border text-left flex flex-col justify-between gap-2 transition cursor-pointer ' + (
+                    isSelected
+                      ? 'bg-amber-500/15 border-amber-400 text-white shadow-[0_0_14px_rgba(245,158,11,0.25)]'
+                      : 'bg-zinc-900/80 border-white/10 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                  )}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className={'text-xs font-bold ' + (isSelected ? 'text-amber-300' : 'text-zinc-200')}>
+                        {model.title}
+                      </span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-zinc-300 font-semibold">
+                        {model.badge}
+                      </span>
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-zinc-400">
+                      {model.desc}
+                    </p>
+                  </div>
+
+                  {/* Micro Visual Preview */}
+                  <div className="w-full h-4 rounded overflow-hidden flex items-stretch border border-white/15 mt-1 bg-neutral-900">
+                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-neutral-300">
+                      <div className="h-[2px] bg-red-700/80 w-full" />
+                      {model.id === 'realistic-3d' && (
+                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                      )}
+                    </div>
+                    <div className="w-2.5 h-[65%] bg-black -mx-1 z-10 rounded-b-[1px] border-x border-neutral-700" />
+                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-neutral-300">
+                      <div className="h-[2px] bg-red-700/80 w-full" />
+                      {model.id === 'realistic-3d' && (
+                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                      )}
+                    </div>
+                    <div className="w-2.5 h-[65%] bg-black -mx-1 z-10 rounded-b-[1px] border-x border-neutral-700" />
+                    <div className="flex-1 h-full bg-white flex flex-col justify-between">
+                      <div className="h-[2px] bg-red-700/80 w-full" />
+                      {model.id === 'realistic-3d' && (
+                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Section: Keyboard Animation Color / Paleta Completa de Cores */}

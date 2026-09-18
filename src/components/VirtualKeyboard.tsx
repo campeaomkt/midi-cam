@@ -1,22 +1,40 @@
-import React, { useMemo, useRef, useEffect } from 'react';
-import { KeyboardTheme, KeyCount } from '../types';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { KeyboardTheme, KeyCount, KeyboardVisualModel } from '../types';
 import {
   getEffectiveActiveColor,
-  hexToRgba,
   getDarkerShade,
   getLighterShade,
 } from '../utils/keyboardColor';
 
+export const KEY_COUNT_OPTIONS: {
+  count: KeyCount;
+  label: string;
+  desc: string;
+  startNote: string;
+  range: string;
+  notesStartOn: string;
+}[] = [
+  { count: 25, label: '25 Teclas', desc: '2 oitavas (Portátil)', startNote: 'C3', range: 'C3 - C5', notesStartOn: 'Dó' },
+  { count: 32, label: '32 Teclas', desc: '2.5 oitavas', startNote: 'F2', range: 'F2 - C5', notesStartOn: 'Fá' },
+  { count: 37, label: '37 Teclas', desc: '3 oitavas (Padrão)', startNote: 'C3', range: 'C3 - C6', notesStartOn: 'Dó' },
+  { count: 44, label: '44 Teclas', desc: '3.5 oitavas', startNote: 'C2', range: 'C2 - G5', notesStartOn: 'Dó' },
+  { count: 49, label: '49 Teclas', desc: '4 oitavas', startNote: 'C2', range: 'C2 - C6', notesStartOn: 'Dó' },
+  { count: 61, label: '61 Teclas', desc: '5 oitavas (Teclado)', startNote: 'C2', range: 'C2 - C7', notesStartOn: 'Dó' },
+  { count: 76, label: '76 Teclas', desc: '6 oitavas', startNote: 'E1', range: 'E1 - G7', notesStartOn: 'Mi' },
+  { count: 88, label: '88 Teclas', desc: '7 oitavas (Piano Completo)', startNote: 'A0', range: 'A0 - C8', notesStartOn: 'Lá' },
+];
+
 interface VirtualKeyboardProps {
-  activeNotes: number[]; // Array of active MIDI note numbers
+  visualModel?: KeyboardVisualModel;
+  activeNotes: number[];
   keyCount?: KeyCount;
-  octaves?: 2 | 3 | 4; // backward compatibility
+  octaves?: 2 | 3 | 4;
   startOctave?: number;
-  octaveShift?: number; // Shift keyboard by +/- octaves (default 0)
-  heightPreset?: 'slim' | 'normal' | 'compact'; // Height profile
+  octaveShift?: number;
+  heightPreset?: 'slim' | 'normal' | 'compact';
   theme?: KeyboardTheme;
-  customColor?: string; // Hex color for custom key animation
-  glowIntensity?: number; // 0 to 100 percentage for key glow/brightness
+  customColor?: string;
+  glowIntensity?: number;
   showNoteNames?: boolean;
   viewMode?: 'fit' | 'scroll';
   onKeyCountChange?: (count: KeyCount) => void;
@@ -31,37 +49,32 @@ export function getKeyboardHeightClass(
   preset: 'slim' | 'normal' | 'compact' | string = 'normal'
 ): string {
   if (viewMode === 'scroll' && keyCount >= 61) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[84px] lg:h-[96px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[92px] lg:h-[106px]';
-    return 'h-[72px] sm:h-[82px] md:h-[102px] lg:h-[118px]';
+    if (preset === 'slim') return 'h-[64px] sm:h-[74px] md:h-[90px] lg:h-[104px]';
+    if (preset === 'compact') return 'h-[70px] sm:h-[82px] md:h-[100px] lg:h-[116px]';
+    return 'h-[78px] sm:h-[92px] md:h-[112px] lg:h-[130px]';
   }
 
-  // Exact proportions based on user's reference screenshot:
-  // On phone: ~70px, on tablet: ~96px-116px where keys are well-proportioned, distinct vertical rectangles.
   if (keyCount >= 61) {
-    if (preset === 'slim') return 'h-[58px] sm:h-[66px] md:h-[84px] lg:h-[96px]';
-    if (preset === 'compact') return 'h-[64px] sm:h-[72px] md:h-[92px] lg:h-[106px]';
-    return 'h-[70px] sm:h-[80px] md:h-[100px] lg:h-[116px]';
+    if (preset === 'slim') return 'h-[62px] sm:h-[72px] md:h-[88px] lg:h-[102px]';
+    if (preset === 'compact') return 'h-[68px] sm:h-[80px] md:h-[98px] lg:h-[114px]';
+    return 'h-[76px] sm:h-[90px] md:h-[110px] lg:h-[128px]';
   }
 
-  // 44 & 49 keys:
   if (keyCount >= 44) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[86px] lg:h-[98px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[94px] lg:h-[108px]';
-    return 'h-[72px] sm:h-[82px] md:h-[104px] lg:h-[120px]';
+    if (preset === 'slim') return 'h-[64px] sm:h-[74px] md:h-[90px] lg:h-[104px]';
+    if (preset === 'compact') return 'h-[70px] sm:h-[82px] md:h-[100px] lg:h-[116px]';
+    return 'h-[78px] sm:h-[92px] md:h-[112px] lg:h-[130px]';
   }
 
-  // 37 keys:
   if (keyCount >= 37) {
-    if (preset === 'slim') return 'h-[62px] sm:h-[70px] md:h-[88px] lg:h-[100px]';
-    if (preset === 'compact') return 'h-[68px] sm:h-[76px] md:h-[96px] lg:h-[110px]';
-    return 'h-[74px] sm:h-[84px] md:h-[106px] lg:h-[122px]';
+    if (preset === 'slim') return 'h-[66px] sm:h-[76px] md:h-[92px] lg:h-[106px]';
+    if (preset === 'compact') return 'h-[72px] sm:h-[84px] md:h-[102px] lg:h-[118px]';
+    return 'h-[80px] sm:h-[94px] md:h-[116px] lg:h-[134px]';
   }
 
-  // 25 & 32 keys:
-  if (preset === 'slim') return 'h-[64px] sm:h-[72px] md:h-[90px] lg:h-[104px]';
-  if (preset === 'compact') return 'h-[70px] sm:h-[78px] md:h-[98px] lg:h-[114px]';
-  return 'h-[76px] sm:h-[86px] md:h-[110px] lg:h-[126px]';
+  if (preset === 'slim') return 'h-[68px] sm:h-[78px] md:h-[94px] lg:h-[108px]';
+  if (preset === 'compact') return 'h-[74px] sm:h-[86px] md:h-[104px] lg:h-[120px]';
+  return 'h-[82px] sm:h-[96px] md:h-[120px] lg:h-[138px]';
 }
 
 interface KeyData {
@@ -71,132 +84,67 @@ interface KeyData {
   name: string;
   octave: number;
   whiteIndex: number;
-  blackPositionPercent?: number;
 }
 
 const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const BLACK_PITCHES = new Set([1, 3, 6, 8, 10]);
 
-export interface KeyCountOption {
-  count: KeyCount;
-  label: string;
-  desc: string;
-  range: string;
-  startNote: string;
-  defaultStartMidi: number;
-  notesStartOn: string;
-}
+function getKeyRange(keyCount: KeyCount, shiftOctaves: number = 0): { startMidi: number; totalKeys: number } {
+  let baseStart: number;
+  let total: number;
 
-export const KEY_COUNT_OPTIONS: KeyCountOption[] = [
-  {
-    count: 25,
-    label: '25 teclas',
-    desc: 'Mini Controller (Launchkey Mini / MPK Mini)',
-    range: 'C3 - C5',
-    startNote: 'C3',
-    defaultStartMidi: 48,
-    notesStartOn: 'Começa em Dó (C3)',
-  },
-  {
-    count: 32,
-    label: '32 teclas',
-    desc: 'Micro Controller (NI Komplete M32 / SA-46)',
-    range: 'F3 - C6',
-    startNote: 'F3',
-    defaultStartMidi: 53,
-    notesStartOn: 'Começa em Fá (F3)',
-  },
-  {
-    count: 37,
-    label: '37 teclas',
-    desc: 'Sintetizador Compacto (MicroKORG / Reface / KeyStep 37)',
-    range: 'C3 - C6',
-    startNote: 'C3',
-    defaultStartMidi: 48,
-    notesStartOn: 'Começa em Dó (C3)',
-  },
-  {
-    count: 44,
-    label: '44 teclas',
-    desc: 'Mini Teclado (Casio SA-76 / SA Series)',
-    range: 'F3 - C7',
-    startNote: 'F3',
-    defaultStartMidi: 53,
-    notesStartOn: 'Começa em Fá (F3)',
-  },
-  {
-    count: 49,
-    label: '49 teclas',
-    desc: '4 Oitavas (Padrão Home Studio)',
-    range: 'C2 - C6',
-    startNote: 'C2',
-    defaultStartMidi: 36,
-    notesStartOn: 'Começa em Dó (C2)',
-  },
-  {
-    count: 61,
-    label: '61 teclas',
-    desc: '5 Oitavas (Padrão Arranjador / Synth)',
-    range: 'C2 - C7',
-    startNote: 'C2',
-    defaultStartMidi: 36,
-    notesStartOn: 'Começa em Dó (C2)',
-  },
-  {
-    count: 64,
-    label: '64 teclas',
-    desc: 'Piano Elétrico Vintage (Wurlitzer 200A)',
-    range: 'A1 - C7',
-    startNote: 'A1',
-    defaultStartMidi: 33,
-    notesStartOn: 'Começa em Lá (A1)',
-  },
-  {
-    count: 73,
-    label: '73 teclas',
-    desc: 'Stage Piano (Rhodes Stage 73 / Nord / SV-2)',
-    range: 'E1 - E7',
-    startNote: 'E1',
-    defaultStartMidi: 28,
-    notesStartOn: 'Começa em Mi (E1)',
-  },
-  {
-    count: 76,
-    label: '76 teclas',
-    desc: 'Workstation (Yamaha Montage / Roland 76)',
-    range: 'E1 - G7',
-    startNote: 'E1',
-    defaultStartMidi: 28,
-    notesStartOn: 'Começa em Mi (E1)',
-  },
-  {
-    count: 88,
-    label: '88 teclas',
-    desc: 'Piano Completo (Acústico / Digital Clavinova)',
-    range: 'A0 - C8',
-    startNote: 'A0',
-    defaultStartMidi: 21,
-    notesStartOn: 'Começa em Lá (A0)',
-  },
-];
+  switch (keyCount) {
+    case 25:
+      baseStart = 48; // C3
+      total = 25;
+      break;
+    case 32:
+      baseStart = 41; // F2
+      total = 32;
+      break;
+    case 37:
+      baseStart = 48; // C3
+      total = 37;
+      break;
+    case 44:
+      baseStart = 36; // C2
+      total = 44;
+      break;
+    case 49:
+      baseStart = 36; // C2
+      total = 49;
+      break;
+    case 61:
+      baseStart = 36; // C2
+      total = 61;
+      break;
+    case 64:
+      baseStart = 36; // C2
+      total = 64;
+      break;
+    case 73:
+      baseStart = 28; // E1
+      total = 73;
+      break;
+    case 76:
+      baseStart = 28; // E1
+      total = 76;
+      break;
+    case 88:
+      baseStart = 21; // A0
+      total = 88;
+      break;
+    default:
+      baseStart = 48;
+      total = 37;
+  }
 
-export function getKeyRange(
-  keyCount: KeyCount,
-  octaveShift: number = 0
-): { startMidi: number; totalKeys: number; startNote: string; range: string } {
-  const opt = KEY_COUNT_OPTIONS.find((o) => o.count === keyCount) || KEY_COUNT_OPTIONS[1];
-  const startMidi = Math.max(0, opt.defaultStartMidi + (octaveShift * 12));
-  const endMidi = Math.min(127, startMidi + opt.count - 1);
-  const startPitch = PITCH_NAMES[startMidi % 12];
-  const startOct = Math.floor(startMidi / 12) - 1;
-  const endPitch = PITCH_NAMES[endMidi % 12];
-  const endOct = Math.floor(endMidi / 12) - 1;
+  const shiftedStart = baseStart + shiftOctaves * 12;
+  const clampedStart = Math.max(0, Math.min(127 - total, shiftedStart));
 
   return {
-    startMidi,
-    totalKeys: opt.count,
-    startNote: `${startPitch}${startOct}`,
-    range: `${startPitch}${startOct} - ${endPitch}${endOct}`,
+    startMidi: clampedStart,
+    totalKeys: total,
   };
 }
 
@@ -212,65 +160,46 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   glowIntensity = 80,
   showNoteNames = false,
   viewMode = 'fit',
+  visualModel = 'realistic-3d',
   onKeyCountChange,
   onViewModeToggle,
   onNotePlay,
   onNoteRelease,
 }) => {
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const touchActiveNotes = useRef<Set<number>>(new Set());
+  const [svgWidth, setSvgWidth] = useState(880);
+  const [svgHeight, setSvgHeight] = useState(115);
 
-  // Determine effective key count
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const update = () => {
+      if (containerRef.current) {
+        const r = containerRef.current.getBoundingClientRect();
+        if (r.width > 50 && r.height > 20) {
+          setSvgWidth(Math.round(r.width));
+          setSvgHeight(Math.round(r.height));
+        }
+      }
+    };
+    update();
+    const obs = new ResizeObserver(update);
+    obs.observe(containerRef.current);
+    return () => obs.disconnect();
+  }, []);
+
   const effectiveKeyCount: KeyCount = keyCount || (octaves === 2 ? 25 : octaves === 4 ? 49 : 37);
 
-  // Dynamic color calculations for keys and glow
   const effectiveColor = useMemo(
     () => getEffectiveActiveColor(theme, customColor),
     [theme, customColor]
   );
-  const darkerColor = useMemo(() => getDarkerShade(effectiveColor, 22), [effectiveColor]);
+  const darkerColor = useMemo(() => getDarkerShade(effectiveColor, 20), [effectiveColor]);
   const lighterColor = useMemo(() => getLighterShade(effectiveColor, 18), [effectiveColor]);
   const deepDarkColor = useMemo(() => getDarkerShade(effectiveColor, 38), [effectiveColor]);
 
-  // Dynamic glow / shadow calculation based on percentage (0 - 100%)
-  const { boxShadowStr } = useMemo(() => {
-    const clampedGlow = Math.max(0, Math.min(100, glowIntensity));
-    if (clampedGlow <= 0) {
-      return { boxShadowStr: 'none' };
-    }
-    const glowAlpha = Math.min(1, (clampedGlow / 100) * 0.95);
-    const glowRadius = Math.round((clampedGlow / 100) * 20);
-    const glowSpread = clampedGlow > 60 ? Math.round(((clampedGlow - 60) / 40) * 4) : 0;
-    const glowRgba = hexToRgba(effectiveColor, glowAlpha);
-    return {
-      boxShadowStr: `0 0 ${glowRadius}px ${glowSpread}px ${glowRgba}`,
-    };
-  }, [effectiveColor, glowIntensity]);
-
-  const activeWhiteStyle: React.CSSProperties = useMemo(
-    () => ({
-      background: `linear-gradient(to top, ${darkerColor}, ${effectiveColor}, ${lighterColor})`,
-      boxShadow: boxShadowStr,
-    }),
-    [darkerColor, effectiveColor, lighterColor, boxShadowStr]
-  );
-
-  const activeBlackStyle: React.CSSProperties = useMemo(
-    () => ({
-      background: `linear-gradient(to top, ${deepDarkColor}, ${darkerColor})`,
-      boxShadow: boxShadowStr,
-    }),
-    [deepDarkColor, darkerColor, boxShadowStr]
-  );
-
   const activeSet = useMemo(() => new Set(activeNotes), [activeNotes]);
 
-  // Compute key layout mathematically:
-  // In every octave:
-  // - 2 first black keys (C#, D#) are precisely in the middle between the 3 first white keys (C, D, E)
-  // - 3 last black keys (F#, G#, A#) are precisely in the middle between the 4 last white keys (F, G, A, B)
-  // - Between E and F: half-step, NO black key!
-  // - Between B and next C: half-step, NO black key!
   const { whiteKeys, blackKeys, totalWhiteKeys } = useMemo(() => {
     const { startMidi, totalKeys } = getKeyRange(effectiveKeyCount, octaveShift);
     const whites: KeyData[] = [];
@@ -293,14 +222,6 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
           whiteIndex: whites.length,
         });
       } else {
-        // At the moment of adding a black key, whites.length is the seam index
-        // dividing the white key immediately to the left and the white key to the right!
-        // E.g. after C (whites.length=1), C# sits at seam index 1 (between C and D).
-        // After D (whites.length=2), D# sits at seam index 2 (between D and E).
-        // (E is added: whites.length=3, F is added: whites.length=4; no black key between E and F).
-        // After F (whites.length=4), F# sits at seam index 4 (between F and G).
-        // After G (whites.length=5), G# sits at seam index 5 (between G and A).
-        // After A (whites.length=6), A# sits at seam index 6 (between A and B).
         blacks.push({
           midi,
           pitchClass,
@@ -311,30 +232,13 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       }
     }
 
-    const totalWhites = whites.length;
-
-    // Calculate position percent for each black key centered right on the seam
-    const calculatedBlacks: KeyData[] = blacks.map((b) => {
-      const leftPercent = (b.seamIndex / totalWhites) * 100;
-      return {
-        midi: b.midi,
-        pitchClass: b.pitchClass,
-        isBlack: true,
-        name: b.name,
-        octave: b.octave,
-        whiteIndex: b.seamIndex,
-        blackPositionPercent: leftPercent,
-      };
-    });
-
     return {
       whiteKeys: whites,
-      blackKeys: calculatedBlacks,
-      totalWhiteKeys: totalWhites,
+      blackKeys: blacks,
+      totalWhiteKeys: whites.length,
     };
   }, [effectiveKeyCount, octaveShift]);
 
-  // Touch & Mouse event handlers
   const handleTouchStart = (midi: number) => {
     touchActiveNotes.current.add(midi);
     onNotePlay?.(midi);
@@ -345,18 +249,56 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     onNoteRelease?.(midi);
   };
 
-  // Black key width is exactly 60% of a white key width
-  const blackWidthPercent = (1 / totalWhiteKeys) * 60;
-
   const heightClass = getKeyboardHeightClass(effectiveKeyCount, viewMode, heightPreset);
-  const noteLabelSize = effectiveKeyCount >= 61 
-    ? 'text-[6.5px] sm:text-[7.5px] md:text-[9.5px] lg:text-[10.5px]' 
-    : effectiveKeyCount >= 44 
-    ? 'text-[7.5px] sm:text-[8.5px] md:text-[10.5px]' 
-    : 'text-[8.5px] sm:text-[10px] md:text-xs';
-  const blackNoteLabelSize = effectiveKeyCount >= 61 
-    ? 'text-[5.5px] sm:text-[6.5px] md:text-[8.5px]' 
-    : 'text-[7px] sm:text-[8px] md:text-[9.5px]';
+
+  // =========================================================================
+  // GEOMETRIA EXATA DO DESENHO DO USUÁRIO (IMAGENS 1, 2, 3):
+  //
+  // 1. Corpo da tecla em perspectiva inclinada ( / )
+  // 2. Chanfro angular de transição
+  // 3. Face Frontal da tecla: A LINHA FICA ESTRITAMENTE VERTICAL ( | )!
+  //    /  <- inclinado em cima
+  //    |  <- 100% reto na face frontal!
+  // =========================================================================
+  const W = svgWidth || 880;
+  const H = svgHeight || 115;
+
+  // Altura da face frontal (onde a linha fica reta | )
+  const frontLipHeight = Math.max(11, Math.min(18, Math.round(H * 0.15)));
+  // Altura do chanfro
+  const chamferHeight = Math.max(5, Math.min(9, Math.round(H * 0.07)));
+
+  // Coordenadas Y dos cortes horizontais
+  const yVerticalStart = H - frontLipHeight; // Linha divisória horizontal entre chanfro e face vertical
+  const yChamferStart = yVerticalStart - chamferHeight; // Linha onde começa o chanfro
+
+  // Inclinação em perspectiva no topo \___/
+  const topInset = Math.round(Math.min(26, Math.max(10, W * 0.022)));
+
+  // Funções de coordenadas X:
+  // No topo (y = 0): x vai de topInset até W - topInset (efeito \___/)
+  const getTopX = (u: number): number => {
+    return topInset + u * (W - 2 * topInset);
+  };
+
+  // Na base inferior (y = H e y = yVerticalStart):
+  // AS LINHAS DA FACE FRONTAL SÃO 100% RETAS E VERTICAIS ( | )!
+  // Logo, o X no início da face vertical e no fim da face vertical é RIGOROSAMENTE O MESMO!
+  const getBaseX = (u: number): number => {
+    return u * W;
+  };
+
+  // No início do chanfro:
+  const getChamferStartX = (u: number): number => {
+    const t0 = getTopX(u);
+    const b0 = getBaseX(u);
+    const ratio = yChamferStart / yVerticalStart;
+    return t0 + ratio * (b0 - t0);
+  };
+
+  // Teclas pretas:
+  const blackKeyTopHeight = yChamferStart * 0.65;
+  const blackKeyFrontHeight = blackKeyTopHeight + Math.max(4, Math.round(chamferHeight * 0.8));
 
   return (
     <div
@@ -364,30 +306,121 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       data-active-color={effectiveColor}
       data-active-dark-color={darkerColor}
       data-glow-intensity={glowIntensity}
-      className="relative w-[95%] sm:w-[92%] md:w-[94%] max-w-5xl mx-auto flex flex-col select-none touch-none"
+      data-visual-model={visualModel}
+      className="relative w-[96%] sm:w-[94%] md:w-[95%] max-w-5xl mx-auto flex flex-col select-none touch-none"
     >
-      {/* Main Piano Keyboard with static layout, crisp straight edges and zero touch shifting */}
       <div
-        ref={scrollContainerRef}
-        className={`relative w-full ${heightClass} rounded-none overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.25)] bg-white border border-neutral-300 touch-none select-none`}
+        ref={containerRef}
+        className={`relative w-full ${heightClass} overflow-hidden touch-none select-none rounded-t-sm rounded-b-md shadow-[0_20px_45px_rgba(0,0,0,0.85),0_6px_16px_rgba(0,0,0,0.65)] bg-[#0d0d10] border-t border-neutral-700 border-b-2 border-black`}
       >
-        <div className="relative h-full w-full flex touch-none">
-          {/* White Keys */}
-          <div className="relative w-full h-full flex touch-none">
-            {whiteKeys.map((key) => {
+        <svg
+          className="w-full h-full block select-none touch-none"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+        >
+          <defs>
+            {/* White Key Inactive Body */}
+            <linearGradient id="whiteKeyBody" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#ffffff" />
+              <stop offset="50%" stopColor="#fbfbfc" />
+              <stop offset="85%" stopColor="#efeff4" />
+              <stop offset="100%" stopColor="#e2e2e9" />
+            </linearGradient>
+
+            {/* White Key Chamfer Bevel */}
+            <linearGradient id="whiteKeyChamfer" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#d0d0d8" />
+              <stop offset="100%" stopColor="#babac4" />
+            </linearGradient>
+
+            {/* White Key Vertical Front Lip: Straight vertical face | */}
+            <linearGradient id="whiteKeyFrontVertical" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#b2b2bc" />
+              <stop offset="45%" stopColor="#9a9aa4" />
+              <stop offset="100%" stopColor="#757580" />
+            </linearGradient>
+
+            {/* Active White Key States */}
+            <linearGradient id="whiteKeyBodyActive" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={lighterColor} />
+              <stop offset="70%" stopColor={effectiveColor} />
+              <stop offset="100%" stopColor={darkerColor} />
+            </linearGradient>
+
+            <linearGradient id="whiteKeyChamferActive" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={darkerColor} />
+              <stop offset="100%" stopColor={deepDarkColor} />
+            </linearGradient>
+
+            <linearGradient id="whiteKeyFrontActive" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={deepDarkColor} />
+              <stop offset="100%" stopColor="#000000" />
+            </linearGradient>
+
+            {/* Black Keys */}
+            <linearGradient id="blackKeyBody" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#2c2c32" />
+              <stop offset="55%" stopColor="#1c1c20" />
+              <stop offset="100%" stopColor="#101013" />
+            </linearGradient>
+
+            <linearGradient id="blackKeyFront" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#161619" />
+              <stop offset="100%" stopColor="#000000" />
+            </linearGradient>
+
+            <linearGradient id="blackKeyBodyActive" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={lighterColor} />
+              <stop offset="60%" stopColor={effectiveColor} />
+              <stop offset="100%" stopColor={darkerColor} />
+            </linearGradient>
+
+            <linearGradient id="blackKeyFrontActive" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={darkerColor} />
+              <stop offset="100%" stopColor={deepDarkColor} />
+            </linearGradient>
+          </defs>
+
+          {/* Red Felt Strip at top */}
+          <rect x={0} y={0} width={W} height={2.5} fill="#881313" />
+
+          {/* ============================================================== */}
+          {/* WHITE KEYS: / no corpo superior, e ESTRITAMENTE RETO | NA FACE */}
+          {/* ============================================================== */}
+          <g id="white-keys-group">
+            {whiteKeys.map((key, i) => {
               const isActive = activeSet.has(key.midi);
+
+              const u0 = i / totalWhiteKeys;
+              const u1 = (i + 1) / totalWhiteKeys;
+
+              // Coordenadas calculadas:
+              const x0_top = getTopX(u0);
+              const x1_top = getTopX(u1);
+
+              const x0_chamfer = getChamferStartX(u0);
+              const x1_chamfer = getChamferStartX(u1);
+
+              const x0_vertical = getBaseX(u0);
+              const x1_vertical = getBaseX(u1);
+
+              // NA FACE FRONTAL: X É IDÊNTICO, RESULTANDO NA LINHA VERTICAL RETA (|)!
+              const x0_bottom = x0_vertical;
+              const x1_bottom = x1_vertical;
+
+              // Polígono 1: Superfície Superior Completa ( / )
+              // Vai do topo (y=0) até a dobra da face frontal (y=yVerticalStart)
+              const bodyPoints = `${x0_top},0 ${x1_top},0 ${x1_vertical},${yVerticalStart} ${x0_vertical},${yVerticalStart}`;
+
+              // Polígono 2: Face Frontal Vertical (LINHAS RETAS VERTICAIS | )
+              // Vai da dobra (y=yVerticalStart) até a base inferior (y=H)
+              const frontPoints = `${x0_vertical},${yVerticalStart} ${x1_vertical},${yVerticalStart} ${x1_bottom},${H} ${x0_bottom},${H}`;
+
               return (
-                <button
+                <g
                   key={key.midi}
                   id={`piano-key-white-${key.midi}`}
-                  type="button"
-                  tabIndex={-1}
-                  style={isActive ? activeWhiteStyle : undefined}
-                  className={`relative flex-1 h-full rounded-none border-r last:border-r-0 border-neutral-300 transition-colors duration-75 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none touch-none outline-none ${
-                    isActive
-                      ? 'z-10 shadow-inner'
-                      : 'bg-white hover:bg-neutral-50 active:bg-neutral-100'
-                  }`}
+                  className="cursor-pointer"
                   onMouseDown={() => handleTouchStart(key.midi)}
                   onMouseUp={() => handleTouchEnd(key.midi)}
                   onMouseLeave={() => {
@@ -399,8 +432,105 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                     e.preventDefault();
                     handleTouchStart(key.midi);
                   }}
-                  onTouchMove={(e) => {
+                  onTouchEnd={(e) => {
                     e.preventDefault();
+                    handleTouchEnd(key.midi);
+                  }}
+                  onTouchCancel={(e) => {
+                    e.preventDefault();
+                    handleTouchEnd(key.midi);
+                  }}
+                >
+                  {/* 1. Superfície Superior em Perspectiva ( / ) */}
+                  <polygon
+                    points={bodyPoints}
+                    fill={isActive ? 'url(#whiteKeyBodyActive)' : 'url(#whiteKeyBody)'}
+                    stroke="#1c1c22"
+                    strokeWidth={0.8}
+                  />
+
+                  {/* 2. Face Frontal 100% Vertical ( | ) */}
+                  <polygon
+                    points={frontPoints}
+                    fill={isActive ? 'url(#whiteKeyFrontActive)' : 'url(#whiteKeyFrontVertical)'}
+                    stroke="#111116"
+                    strokeWidth={0.8}
+                  />
+
+                  {/* Linha de sombra inferior */}
+                  <line
+                    x1={x0_bottom}
+                    y1={H - 0.75}
+                    x2={x1_bottom}
+                    y2={H - 0.75}
+                    stroke="#000000"
+                    strokeWidth={1.5}
+                  />
+
+                  {/* Nome da Nota */}
+                  {showNoteNames && (
+                    <text
+                      x={(x0_chamfer + x1_chamfer) / 2}
+                      y={yVerticalStart - 7}
+                      textAnchor="middle"
+                      fill={isActive ? '#0a0a0c' : '#52525b'}
+                      fontSize={effectiveKeyCount >= 61 ? 8 : 10}
+                      fontWeight="bold"
+                      className="pointer-events-none select-none font-sans"
+                    >
+                      {key.pitchClass === 0 || key.whiteIndex === 0
+                        ? `${key.name}${key.octave}`
+                        : key.name}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+
+          {/* ============================================================== */}
+          {/* BLACK KEYS                                                     */}
+          {/* ============================================================== */}
+          <g id="black-keys-group">
+            {blackKeys.map((key) => {
+              const isActive = activeSet.has(key.midi);
+
+              const seamIndex = key.seamIndex;
+              const uSeam = seamIndex / totalWhiteKeys;
+
+              const halfW = (1 / totalWhiteKeys) * 0.31;
+              const u0 = Math.max(0, uSeam - halfW);
+              const u1 = Math.min(1, uSeam + halfW);
+
+              const x0_top = getTopX(u0);
+              const x1_top = getTopX(u1);
+
+              const tTop = blackKeyTopHeight / yVerticalStart;
+              const x0_bodyBot = getTopX(u0) + tTop * (getBaseX(u0) - getTopX(u0));
+              const x1_bodyBot = getTopX(u1) + tTop * (getBaseX(u1) - getTopX(u1));
+
+              // Face frontal reta vertical da tecla preta:
+              const x0_frontBot = x0_bodyBot;
+              const x1_frontBot = x1_bodyBot;
+
+              const topPolygon = `${x0_top},0 ${x1_top},0 ${x1_bodyBot},${blackKeyTopHeight} ${x0_bodyBot},${blackKeyTopHeight}`;
+              const frontPolygon = `${x0_bodyBot},${blackKeyTopHeight} ${x1_bodyBot},${blackKeyTopHeight} ${x1_frontBot},${blackKeyFrontHeight} ${x0_frontBot},${blackKeyFrontHeight}`;
+
+              return (
+                <g
+                  key={key.midi}
+                  id={`piano-key-black-${key.midi}`}
+                  className="cursor-pointer"
+                  onMouseDown={() => handleTouchStart(key.midi)}
+                  onMouseUp={() => handleTouchEnd(key.midi)}
+                  onMouseLeave={() => {
+                    if (touchActiveNotes.current.has(key.midi)) {
+                      handleTouchEnd(key.midi);
+                    }
+                  }}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    handleTouchStart(key.midi);
                   }}
                   onTouchEnd={(e) => {
                     e.preventDefault();
@@ -410,88 +540,53 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                     e.preventDefault();
                     handleTouchEnd(key.midi);
                   }}
-                  onContextMenu={(e) => e.preventDefault()}
                 >
-                  {/* Subtle top edge gloss line */}
-                  <div className="absolute top-0 inset-x-0 h-0.5 bg-neutral-200/50 pointer-events-none" />
+                  <polygon
+                    points={`${x0_bodyBot - 1.5},${blackKeyTopHeight + 1} ${x1_bodyBot + 2},${blackKeyTopHeight + 1} ${x1_frontBot + 2},${blackKeyFrontHeight + 2} ${x0_frontBot - 1.5},${blackKeyFrontHeight + 2}`}
+                    fill="rgba(0,0,0,0.5)"
+                  />
 
-                  {/* Optional Note Name Label */}
+                  <polygon
+                    points={topPolygon}
+                    fill={isActive ? 'url(#blackKeyBodyActive)' : 'url(#blackKeyBody)'}
+                    stroke="#000000"
+                    strokeWidth={0.8}
+                  />
+
+                  <line
+                    x1={x0_top + 0.5}
+                    y1={0}
+                    x2={x0_bodyBot + 0.5}
+                    y2={blackKeyTopHeight}
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeWidth={0.8}
+                  />
+
+                  <polygon
+                    points={frontPolygon}
+                    fill={isActive ? 'url(#blackKeyFrontActive)' : 'url(#blackKeyFront)'}
+                    stroke="#000000"
+                    strokeWidth={0.8}
+                  />
+
                   {showNoteNames && (
-                    <span
-                      className={`${noteLabelSize} font-bold tracking-tight pointer-events-none select-none ${
-                        isActive ? 'text-neutral-900' : 'text-zinc-500'
-                      }`}
+                    <text
+                      x={(x0_bodyBot + x1_bodyBot) / 2}
+                      y={blackKeyTopHeight - 4}
+                      textAnchor="middle"
+                      fill={isActive ? '#000000' : '#a1a1aa'}
+                      fontSize={effectiveKeyCount >= 61 ? 6.5 : 8}
+                      fontWeight="bold"
+                      className="pointer-events-none select-none font-sans"
                     >
-                      {key.pitchClass === 0 || key.whiteIndex === 0
-                        ? `${key.name}${key.octave}`
-                        : key.name}
-                    </span>
+                      {key.name}
+                    </text>
                   )}
-                </button>
+                </g>
               );
             })}
-          </div>
-
-          {/* Black Keys: positioned exactly at the seam dividing the adjacent white keys */}
-          {blackKeys.map((key) => {
-            const isActive = activeSet.has(key.midi);
-
-            return (
-              <button
-                key={key.midi}
-                id={`piano-key-black-${key.midi}`}
-                type="button"
-                tabIndex={-1}
-                style={{
-                  left: `${key.blackPositionPercent}%`,
-                  width: `${blackWidthPercent}%`,
-                  ...(isActive ? activeBlackStyle : {}),
-                }}
-                className={`absolute top-0 h-[62%] -translate-x-1/2 rounded-none transition-colors duration-75 z-20 flex flex-col justify-end items-center pb-0.5 sm:pb-1 cursor-pointer select-none touch-none outline-none ${
-                  isActive
-                    ? 'shadow-inner'
-                    : 'bg-[#18181b] shadow-[0_1px_3px_rgba(0,0,0,0.5)] hover:bg-[#27272a]'
-                }`}
-                onMouseDown={() => handleTouchStart(key.midi)}
-                onMouseUp={() => handleTouchEnd(key.midi)}
-                onMouseLeave={() => {
-                  if (touchActiveNotes.current.has(key.midi)) {
-                    handleTouchEnd(key.midi);
-                  }
-                }}
-                onTouchStart={(e) => {
-                  e.preventDefault();
-                  handleTouchStart(key.midi);
-                }}
-                onTouchMove={(e) => {
-                  e.preventDefault();
-                }}
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  handleTouchEnd(key.midi);
-                }}
-                onTouchCancel={(e) => {
-                  e.preventDefault();
-                  handleTouchEnd(key.midi);
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-              >
-                {/* 3D top sheen */}
-                <div className="absolute inset-x-0.5 top-0 h-[82%] bg-white/[0.06] rounded-none pointer-events-none" />
-
-                {showNoteNames && (
-                  <span
-                    className={`${blackNoteLabelSize} font-semibold pointer-events-none select-none ${
-                      isActive ? 'text-neutral-950' : 'text-zinc-400'
-                    }`}
-                  >
-                    {key.name}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+          </g>
+        </svg>
       </div>
     </div>
   );

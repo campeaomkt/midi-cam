@@ -28,6 +28,7 @@ import { RecordedVideosModal } from './components/RecordedVideosModal';
 import { SoundFontManagerModal } from './components/SoundFontManagerModal';
 import { WifiMidiSyncModal } from './components/WifiMidiSyncModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AiDubbingModal } from './components/AiDubbingModal';
 import { sf2Engine } from './utils/sf2Engine';
 import { loadSoundFontFromStorage } from './utils/sf2Storage';
 import { timbreEngine } from './utils/timbreEngine';
@@ -64,6 +65,7 @@ export default function App() {
     soundEnabled: true,
     synthVolume: 0.75,
     viewMode: 'fit',
+    visualModel: 'realistic-3d',
   });
 
   // Filter and Color Grading State
@@ -101,6 +103,8 @@ export default function App() {
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isSoundFontOpen, setIsSoundFontOpen] = useState(false);
   const [isWifiSyncOpen, setIsWifiSyncOpen] = useState(false);
+  const [isAiDubbingOpen, setIsAiDubbingOpen] = useState(false);
+  const [dubbingTargetRecording, setDubbingTargetRecording] = useState<VideoRecording | null>(null);
   const [wifiSyncStatus, setWifiSyncStatus] = useState<WifiSyncStatus>(() =>
     wifiMidiBridge.getStatus()
   );
@@ -463,6 +467,14 @@ export default function App() {
             wifiSyncStatus={wifiSyncStatus}
             onOpenWifiSync={() => setIsWifiSyncOpen(true)}
             onToggleSustain={handleToggleSustain}
+            onOpenAiDubbing={() => {
+              if (recordings.length > 0) {
+                setDubbingTargetRecording(recordings[0]);
+              } else {
+                setDubbingTargetRecording(null);
+              }
+              setIsAiDubbingOpen(true);
+            }}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
             onOpenSettings={() => setIsSettingsOpen(true)}
@@ -528,6 +540,15 @@ export default function App() {
           setIsWifiSyncOpen(true);
         }}
         onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
+        onOpenAiDubbing={() => {
+          setIsSettingsOpen(false);
+          if (recordings.length > 0) {
+            setDubbingTargetRecording(recordings[0]);
+          } else {
+            setDubbingTargetRecording(null);
+          }
+          setIsAiDubbingOpen(true);
+        }}
         onRequestMidi={handleRequestMidi}
         onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
         onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
@@ -578,6 +599,24 @@ export default function App() {
         recordings={recordings}
         onDeleteRecording={handleDeleteRecording}
         onImportMedia={handleImportMedia}
+        onOpenDubbing={(rec) => {
+          setDubbingTargetRecording(rec);
+          setIsAiDubbingOpen(true);
+        }}
+      />
+
+      {/* AI Dubbing & Spanish Translation Modal (OpenAI Client-Side) */}
+      <AiDubbingModal
+        isOpen={isAiDubbingOpen}
+        onClose={() => {
+          setIsAiDubbingOpen(false);
+          setDubbingTargetRecording(null);
+        }}
+        recording={dubbingTargetRecording}
+        onDubbingComplete={async (newDubbedRec) => {
+          setRecordings((prev) => [newDubbedRec, ...prev]);
+          await saveRecordingToStorage(newDubbedRec);
+        }}
       />
     </div>
   );

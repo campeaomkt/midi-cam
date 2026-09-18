@@ -468,6 +468,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                 glowIntensity={keyboardSettings.glowIntensity ?? 80}
                 showNoteNames={keyboardSettings.showNoteNames}
                 viewMode={keyboardSettings.viewMode}
+                visualModel={keyboardSettings.visualModel || 'realistic-acoustic'}
                 onNotePlay={onNotePlay}
                 onNoteRelease={onNoteRelease}
               />

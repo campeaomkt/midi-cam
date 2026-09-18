@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Music,
   Wifi,
+  Languages,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -27,6 +28,7 @@ interface TopHudBarProps {
   wifiSyncStatus?: WifiSyncStatus;
   onOpenWifiSync?: () => void;
   onToggleSustain?: () => void;
+  onOpenAiDubbing?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
   onOpenSettings: () => void;
@@ -46,6 +48,7 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   wifiSyncStatus,
   onOpenWifiSync,
   onToggleSustain,
+  onOpenAiDubbing,
   onUpdateCamera,
   onUpdateKeyboard,
   onOpenSettings,
@@ -125,6 +128,19 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           >
             <Grid3X3 className="w-5 h-5" />
           </button>
+
+          {/* AI Dubbing / Translation Icon */}
+          {onOpenAiDubbing && (
+            <button
+              type="button"
+              id="btn-open-ai-dubbing"
+              onClick={onOpenAiDubbing}
+              className="p-1.5 md:p-2 rounded-full text-cyan-400 bg-cyan-400/15 hover:bg-cyan-400/25 border border-cyan-400/30 transition active:scale-90 cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+              title="Dublagem & Tradução IA para Espanhol (OpenAI)"
+            >
+              <Languages className="w-5 h-5" />
+            </button>
+          )}
 
           {/* Settings Modal */}
           <button
