@@ -18,17 +18,20 @@ import {
   ChevronRight,
   Eye,
   Edit3,
-  Music,
+  Gauge,
+  Timer,
 } from 'lucide-react';
 import {
   DubbingConfig,
   DubbingStepStatus,
+  TranscriptionResult,
   getStoredDubbingConfig,
   saveStoredDubbingConfig,
   extractAudioFromVideoBlob,
   transcribeAudioWhisper,
   translateCopyGPT,
   generateSpeechTTS,
+  generateSynchronizedSpeechTTS,
   assembleDubbedVideo,
 } from '../utils/aiDubbingService';
 
@@ -65,6 +68,8 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
   const [transcribedTextPt, setTranscribedTextPt] = useState<string>('');
   const [translatedTextEs, setTranslatedTextEs] = useState<string>('');
   const [generatedAudioBlob, setGeneratedAudioBlob] = useState<Blob | null>(null);
+  const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionResult | null>(null);
+  const [appliedSpeechSpeed, setAppliedSpeechSpeed] = useState<number>(1.0);
   const [dubbedVideoResult, setDubbedVideoResult] = useState<{
     blob: Blob;
     url: string;
@@ -76,7 +81,6 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
   const [isRegeneratingTTS, setIsRegeneratingTTS] = useState<boolean>(false);
   const [isReassemblingVideo, setIsReassemblingVideo] = useState<boolean>(false);
   const [assemblyProgress, setAssemblyProgress] = useState<number>(0);
-  const [backgroundPianoVolume, setBackgroundPianoVolume] = useState<number>(0.35);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dubbed' | 'original' | 'compare'>('dubbed');
 
@@ -110,6 +114,18 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
 
   const handleModelChange = (model: DubbingConfig['model']) => {
     const updated = { ...config, model };
+    setConfig(updated);
+    saveStoredDubbingConfig(updated);
+  };
+
+  const handleSpeedModeChange = (speedMode: 'auto' | 'custom', customSpeed?: number) => {
+    const updated = { ...config, speedMode, customSpeed: customSpeed ?? config.customSpeed ?? 1.0 };
+    setConfig(updated);
+    saveStoredDubbingConfig(updated);
+  };
+
+  const handleSpeechOffsetChange = (speechOffset: number) => {
+    const updated = { ...config, speechOffset };
     setConfig(updated);
     saveStoredDubbingConfig(updated);
   };
@@ -158,42 +174,62 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       setOriginalAudioBlob(audioBlob);
       updateStep(1, 'completed');
 
-      // Step 2: Transcribe Whisper
+      // Step 2: Transcribe Whisper with speech timing detection
       setCurrentStep(2);
       updateStep(2, 'in-progress');
-      const textPt = await transcribeAudioWhisper(audioBlob, config.apiKey);
-      if (!textPt) {
-        throw new Error('Nenhuma fala ou áudio detectado no vídeo. Certifique-se de que o microfone estava ativo durante a gravação.');
+      const transResult = await transcribeAudioWhisper(audioBlob, config.apiKey);
+      if (!transResult.text) {
+        throw new Error('Nenhuma fala detectada no vídeo. Certifique-se de que o microfone estava ativo durante a gravação.');
       }
-      setTranscribedTextPt(textPt);
-      updateStep(2, 'completed');
+      setTranscribedTextPt(transResult.text);
+      setTranscriptionInfo(transResult);
+      updateStep(
+        2,
+        'completed',
+        `Fala detectada: ${transResult.speechDuration.toFixed(1)}s (Início em ${transResult.speechStartTime.toFixed(1)}s)`
+      );
 
-      // Step 3: Translate with GPT-4o-mini
+      // Step 3: Translate with GPT-4o-mini matched to original speech cadence
       setCurrentStep(3);
       updateStep(3, 'in-progress');
-      const textEs = await translateCopyGPT(textPt, config.apiKey);
+      const textEs = await translateCopyGPT(transResult.text, config.apiKey, transResult.speechDuration);
       setTranslatedTextEs(textEs);
       updateStep(3, 'completed');
 
-      // Step 4: Generate Voice with OpenAI TTS
+      // Step 4: Generate Voice with OpenAI TTS (Auto-synchronized speech rate)
       setCurrentStep(4);
-      updateStep(4, 'in-progress');
-      const speechBlob = await generateSpeechTTS(textEs, config.apiKey, config.voice, config.model);
+      updateStep(4, 'in-progress', 'Calibrando velocidade e cadência da fala...');
+      const { blob: speechBlob, duration: ttsDur, appliedSpeed } = await generateSynchronizedSpeechTTS(
+        textEs,
+        config.apiKey,
+        config.voice,
+        config.model,
+        transResult.speechDuration,
+        config.speedMode === 'custom' ? config.customSpeed : undefined
+      );
       setGeneratedAudioBlob(speechBlob);
-      updateStep(4, 'completed');
+      setAppliedSpeechSpeed(appliedSpeed);
+      updateStep(
+        4,
+        'completed',
+        `Voz gerada: ${ttsDur.toFixed(1)}s (Velocidade: ${appliedSpeed.toFixed(2)}x)`
+      );
 
-      // Step 5: Assemble Dubbed Video in Browser
+      // Step 5: Assemble Dubbed Video in Browser (100% audio replacement & sync)
       setCurrentStep(5);
-      updateStep(5, 'in-progress');
+      updateStep(5, 'in-progress', 'Substituindo áudio original e sincronizando vídeo...');
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
         speechBlob,
-        (pct) => setAssemblyProgress(pct),
-        backgroundPianoVolume
+        {
+          speechStartTime: transResult.speechStartTime,
+          speechOffset: config.speechOffset,
+          onProgress: (pct) => setAssemblyProgress(pct),
+        }
       );
       setDubbedVideoResult(assembled);
-      updateStep(5, 'completed');
+      updateStep(5, 'completed', 'Vídeo dublado com áudio em espanhol sincronizado!');
 
       // Notify parent/storage
       const newRec: VideoRecording = {
@@ -235,19 +271,31 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     setErrorMessage(null);
     try {
       updateStep(4, 'in-progress', 'Regerando áudio com a nova copy...');
-      const speechBlob = await generateSpeechTTS(translatedTextEs, config.apiKey, config.voice, config.model);
+      const targetDuration = transcriptionInfo?.speechDuration;
+      const { blob: speechBlob, duration: ttsDur, appliedSpeed } = await generateSynchronizedSpeechTTS(
+        translatedTextEs,
+        config.apiKey,
+        config.voice,
+        config.model,
+        targetDuration,
+        config.speedMode === 'custom' ? config.customSpeed : undefined
+      );
       setGeneratedAudioBlob(speechBlob);
-      updateStep(4, 'completed', 'Novo áudio gerado com sucesso!');
+      setAppliedSpeechSpeed(appliedSpeed);
+      updateStep(4, 'completed', `Voz gerada: ${ttsDur.toFixed(1)}s (Velocidade: ${appliedSpeed.toFixed(2)}x)`);
 
       // Re-assemble video
       setIsReassemblingVideo(true);
-      updateStep(5, 'in-progress', 'Remontando vídeo final com a nova locução...');
+      updateStep(5, 'in-progress', 'Remontando vídeo final com novo áudio sincronizado...');
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
         speechBlob,
-        (pct) => setAssemblyProgress(pct),
-        backgroundPianoVolume
+        {
+          speechStartTime: transcriptionInfo?.speechStartTime ?? 0,
+          speechOffset: config.speechOffset,
+          onProgress: (pct) => setAssemblyProgress(pct),
+        }
       );
       setDubbedVideoResult(assembled);
       updateStep(5, 'completed', 'Vídeo dublado atualizado!');
@@ -426,30 +474,69 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
                 </div>
               </div>
 
-              {/* Background Music / Piano Volume */}
+              {/* Speech Speed & Cadence Control */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-zinc-300 font-semibold flex items-center justify-between">
                   <span className="flex items-center gap-1">
-                    <Music className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Teclado ao Fundo</span>
+                    <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Velocidade de Fala</span>
                   </span>
-                  <span className="text-[11px] font-mono text-cyan-300 font-bold">
-                    {Math.round(backgroundPianoVolume * 100)}%
+                  <span className="text-[10px] font-mono text-cyan-300 font-bold">
+                    {config.speedMode === 'auto' ? 'Auto Sincronizado' : `${config.customSpeed ?? 1.0}x`}
                   </span>
                 </label>
-                <div className="h-[38px] flex items-center bg-black/70 border border-white/20 rounded-lg px-2.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={backgroundPianoVolume}
-                    onChange={(e) => setBackgroundPianoVolume(parseFloat(e.target.value))}
-                    className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-700 rounded-lg"
-                    title={`Volume do som do teclado original: ${Math.round(backgroundPianoVolume * 100)}%`}
-                  />
-                </div>
+                <select
+                  value={config.speedMode === 'auto' ? 'auto' : String(config.customSpeed ?? 1.0)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'auto') {
+                      handleSpeedModeChange('auto');
+                    } else {
+                      handleSpeedModeChange('custom', parseFloat(val));
+                    }
+                  }}
+                  className="bg-black/70 border border-white/20 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-400 cursor-pointer"
+                >
+                  <option value="auto">Auto (Calibrar com o Vídeo)</option>
+                  <option value="0.9">0.9x (Mais Pausado)</option>
+                  <option value="1.0">1.0x (Velocidade Normal)</option>
+                  <option value="1.1">1.1x (Rápido / Dinâmico)</option>
+                  <option value="1.2">1.2x (Enérgico)</option>
+                  <option value="1.3">1.3x (Acelerado)</option>
+                </select>
               </div>
+
+              {/* Start Alignment / Offset */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-zinc-300 font-semibold flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Timer className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Ajuste de Início</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-300 font-bold">
+                    {(config.speechOffset ?? 0) > 0 ? `+${config.speechOffset}s` : `${config.speechOffset ?? 0}s`}
+                  </span>
+                </label>
+                <select
+                  value={String(config.speechOffset ?? 0)}
+                  onChange={(e) => handleSpeechOffsetChange(parseFloat(e.target.value))}
+                  className="bg-black/70 border border-white/20 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-400 cursor-pointer"
+                >
+                  <option value="-0.4">-0.4s (Adiantar fala)</option>
+                  <option value="-0.2">-0.2s (Adiantar fala)</option>
+                  <option value="0">0.0s (Sincronia Automática Whisper)</option>
+                  <option value="0.2">+0.2s (Atrasar fala)</option>
+                  <option value="0.4">+0.4s (Atrasar fala)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Replacement Banner */}
+            <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>Substituição Pura:</strong> O áudio original em português é 100% mutado e removido do arquivo final, mantendo apenas a voz em espanhol ajustada ao ritmo do vídeo.
+              </span>
             </div>
           </div>
         )}
@@ -642,6 +729,24 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
                   Original (PT)
                 </button>
               </div>
+            </div>
+
+            {/* Sync & Audio Replacement Status Badges */}
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="px-2.5 py-1 rounded-md bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-medium flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Áudio PT 100% substituído por Espanhol</span>
+              </span>
+              <span className="px-2.5 py-1 rounded-md bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono flex items-center gap-1.5">
+                <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Velocidade de Fala: {appliedSpeechSpeed.toFixed(2)}x</span>
+              </span>
+              {transcriptionInfo && (
+                <span className="px-2.5 py-1 rounded-md bg-amber-950/70 border border-amber-500/40 text-amber-300 font-mono flex items-center gap-1.5">
+                  <Timer className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Início da Fala: {transcriptionInfo.speechStartTime.toFixed(1)}s (Duração: {transcriptionInfo.speechDuration.toFixed(1)}s)</span>
+                </span>
+              )}
             </div>
 
             {/* Video Player */}
