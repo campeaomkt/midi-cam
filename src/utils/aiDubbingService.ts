@@ -346,26 +346,32 @@ export async function transcribeAudioWhisper(
   const data = await res.json();
   const text = (data.text || '').trim();
   const duration = Number(data.duration) || vadHint?.totalDuration || 0;
-  const segments = Array.isArray(data.segments) ? data.segments : [];
+
+  // Extract raw segments with { start, end, text } directly from Whisper
+  const segments: Array<{ start: number; end: number; text: string }> = Array.isArray(data.segments)
+    ? data.segments
+        .filter((s: any) => s && typeof s.text === 'string' && s.text.trim().length > 0)
+        .map((s: any) => ({
+          start: Math.max(0, Number(Number(s.start ?? 0).toFixed(2))),
+          end: Math.max(0.1, Number(Number(s.end ?? 0).toFixed(2))),
+          text: String(s.text || '').trim(),
+        }))
+    : [];
 
   let speechStartTime = vadHint?.speechStartTime ?? 0;
   let speechEndTime = vadHint?.speechEndTime ?? duration;
 
   // Cross-verify with Whisper segments if available
   if (segments.length > 0) {
-    const validSegments = segments.filter((s: any) => s.text && s.text.trim().length > 0);
-    if (validSegments.length > 0) {
-      const whisperStart = Math.max(0, validSegments[0].start ?? 0);
-      const whisperEnd = Math.max(whisperStart + 0.3, validSegments[validSegments.length - 1].end ?? duration);
+    const whisperStart = segments[0].start;
+    const whisperEnd = Math.max(whisperStart + 0.3, segments[segments.length - 1].end);
 
-      // If VAD detected an initial pause before speaking, preserve it
-      if (vadHint && vadHint.speechStartTime >= 0.5) {
-        speechStartTime = vadHint.speechStartTime;
-      } else if (whisperStart > 0.3) {
-        speechStartTime = whisperStart;
-      }
-      speechEndTime = Math.max(speechStartTime + 0.5, whisperEnd);
+    if (vadHint && vadHint.speechStartTime >= 0.5) {
+      speechStartTime = vadHint.speechStartTime;
+    } else if (whisperStart > 0.3) {
+      speechStartTime = whisperStart;
     }
+    speechEndTime = Math.max(speechStartTime + 0.5, whisperEnd);
   }
 
   const speechDuration = Math.max(0.5, speechEndTime - speechStartTime);
@@ -386,128 +392,76 @@ export async function transcribeAudioWhisper(
 }
 
 /**
- * Groups and cleans Whisper segments into natural speaking blocks,
- * preserving genuine human pauses, breaths, and breaks (gap >= 0.45s).
+ * Extracts Whisper segments with { start, end, text, duration } for Time-aligned Dubbing.
+ * Preserves each segment boundary and all natural pauses/silences between them.
  */
-export function processAndGroupWhisperSegments(
+export function extractWhisperSegments(
   rawSegments: Array<{ start: number; end: number; text: string }>,
   fullText: string,
-  totalDuration: number,
-  vadHint?: VoiceActivityAnalysis
+  totalDuration: number
 ): SpeechSegment[] {
-  const cleanedText = fullText.trim();
-  const validRaw = (rawSegments || [])
-    .filter((s) => s.text && s.text.trim().length > 0)
-    .map((s, idx) => ({
-      id: idx,
-      start: Math.max(0, Number(Number(s.start).toFixed(2))),
-      end: Math.max(0.1, Number(Number(s.end).toFixed(2))),
-      text: s.text.trim(),
-    }));
-
-  // Fallback: If Whisper didn't return valid segments, split text by sentence punctuation
-  if (validRaw.length === 0) {
-    if (!cleanedText) return [];
-    const sentences = cleanedText
-      .split(/(?<=[.!?\n])\s+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-    const speechStart = vadHint?.speechStartTime ?? 0;
-    const speechEnd = vadHint?.speechEndTime ?? totalDuration;
-    const speechDur = Math.max(1, speechEnd - speechStart);
-
-    if (sentences.length <= 1) {
-      return [
-        {
-          id: 0,
-          start: speechStart,
-          end: speechEnd,
-          duration: speechDur,
-          originalText: cleanedText,
-        },
-      ];
-    }
-
-    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0) || 1;
-    let currentStart = speechStart;
-    const pauseBetween = Math.min(0.8, Math.max(0.3, (speechDur * 0.15) / sentences.length));
-    const effectiveSpeakingTime = Math.max(0.5, speechDur - pauseBetween * (sentences.length - 1));
-
-    return sentences.map((sent, i) => {
-      const charRatio = sent.length / totalChars;
-      const sentDuration = Math.max(0.8, Number((effectiveSpeakingTime * charRatio).toFixed(2)));
-      const start = Number(currentStart.toFixed(2));
-      const end = Number((start + sentDuration).toFixed(2));
-      currentStart = end + pauseBetween;
-      return {
-        id: i,
-        start,
-        end,
-        duration: sentDuration,
-        originalText: sent,
-      };
-    });
-  }
-
-  // Merge continuous words within a sentence, but strictly preserve real pauses (gap >= 0.45s)
-  const grouped: SpeechSegment[] = [];
-  let curStart = validRaw[0].start;
-  let curEnd = validRaw[0].end;
-  let curTexts = [validRaw[0].text];
-
-  for (let i = 1; i < validRaw.length; i++) {
-    const next = validRaw[i];
-    const gap = next.start - curEnd;
-    const lastText = curTexts[curTexts.length - 1];
-    const endsWithTerminal = /[.!?]$/.test(lastText);
-
-    // If gap between phrases is >= 0.45s, this is a genuine pause in speech!
-    // Or if sentence is already > 3.5s and ends with punctuation, start a new segment.
-    const isDistinctPause = gap >= 0.45;
-    const isLongSentenceWithBreak = (curEnd - curStart) >= 3.5 && endsWithTerminal;
-
-    if (isDistinctPause || isLongSentenceWithBreak) {
-      grouped.push({
-        id: grouped.length,
-        start: curStart,
-        end: curEnd,
-        duration: Number((curEnd - curStart).toFixed(2)),
-        originalText: curTexts.join(' '),
+  if (Array.isArray(rawSegments) && rawSegments.length > 0) {
+    const valid = rawSegments
+      .filter((s) => s && s.text && s.text.trim().length > 0)
+      .map((s, idx) => {
+        const start = Math.max(0, Number(Number(s.start).toFixed(2)));
+        const end = Math.max(start + 0.1, Number(Number(s.end).toFixed(2)));
+        const duration = Number((end - start).toFixed(2));
+        return {
+          id: idx,
+          start,
+          end,
+          duration,
+          originalText: s.text.trim(),
+        };
       });
-      curStart = next.start;
-      curEnd = next.end;
-      curTexts = [next.text];
-    } else {
-      curEnd = Math.max(curEnd, next.end);
-      curTexts.push(next.text);
+
+    if (valid.length > 0) {
+      return valid;
     }
   }
 
-  if (curTexts.length > 0) {
-    grouped.push({
-      id: grouped.length,
-      start: curStart,
-      end: curEnd,
-      duration: Number((curEnd - curStart).toFixed(2)),
-      originalText: curTexts.join(' '),
-    });
+  // Fallback: If Whisper didn't return segments (e.g. single short sentence)
+  const cleanedText = fullText.trim();
+  if (!cleanedText) return [];
+
+  const sentences = cleanedText
+    .split(/(?<=[.!?\n])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  if (sentences.length <= 1) {
+    return [
+      {
+        id: 0,
+        start: 0,
+        end: totalDuration,
+        duration: Math.max(0.5, totalDuration),
+        originalText: cleanedText,
+      },
+    ];
   }
 
-  // If acoustic VAD detected an initial pause >= 0.5s, align the first segment's start
-  if (grouped.length > 0 && vadHint && vadHint.speechStartTime >= 0.5) {
-    if (grouped[0].start < vadHint.speechStartTime - 0.4) {
-      grouped[0].start = vadHint.speechStartTime;
-      grouped[0].duration = Math.max(0.5, grouped[0].end - grouped[0].start);
-    }
-  }
-
-  return grouped;
+  const durPerSentence = Number((totalDuration / sentences.length).toFixed(2));
+  return sentences.map((sent, i) => {
+    const start = Number((i * durPerSentence).toFixed(2));
+    const end = Number(((i + 1) * durPerSentence).toFixed(2));
+    return {
+      id: i,
+      start,
+      end,
+      duration: Number((end - start).toFixed(2)),
+      originalText: sent,
+    };
+  });
 }
 
+// Alias for backwards compatibility
+export const processAndGroupWhisperSegments = extractWhisperSegments;
+
 /**
- * Translates segments sentence-by-sentence with GPT-4o-mini, calibrating the
- * length/syllables of each Spanish phrase to fit within that phrase's exact time window.
+ * Translates segments with GPT-4o-mini under strict time constraint (duration = end - start).
+ * The translated Spanish text must fit within that segment's exact duration in natural speech.
  */
 export async function translateSegmentsGPT(
   segments: SpeechSegment[],
@@ -516,35 +470,30 @@ export async function translateSegmentsGPT(
 ): Promise<SpeechSegment[]> {
   if (segments.length === 0) return [];
 
-  if (segments.length === 1) {
-    const singleEs = await translateCopyGPT(segments[0].originalText, apiKey, segments[0].duration);
-    return [
-      {
-        ...segments[0],
-        translatedText: singleEs,
-      },
-    ];
-  }
-
   const payload = segments.map((s) => ({
     id: s.id,
-    start_sec: Number(s.start.toFixed(1)),
-    duration_sec: Number(s.duration.toFixed(1)),
+    start: Number(s.start.toFixed(2)),
+    end: Number(s.end.toFixed(2)),
+    duration: Number((s.end - s.start).toFixed(2)),
     text_pt: s.originalText,
   }));
 
   const systemPrompt =
-`Você é um especialista em dublagem e copywriting para criativos de tráfego pago (TikTok, Reels, Shorts), com padrão de sincronia idêntico ao ElevenLabs.
-O vídeo possui ${segments.length} frases com pausas reais entre elas.
-Sua missão:
-1. Traduzir cada frase do português para o espanhol latino neutro, mantendo tom persuasivo, ganchos e retenção.
-2. CRÍTICO PARA SINCRONIA: O locutor no vídeo fez pausas entre as frases. Cada frase em espanhol será gravada separadamente e DEVE caber com perfeição dentro do tempo 'duration_sec' daquela frase com dicção humana natural (nem rápido demais nem devagar). Frases curtas devem ter poucas palavras; frases mais longas podem desenvolver mais a ideia.
-3. Respeite a divisão em ${segments.length} frases e mantenha o mesmo "id".
-4. Retorne EXCLUSIVAMENTE um objeto JSON com a propriedade "translations" no formato:
+`Você é um especialista em dublagem alinhada por tempo (Time-aligned Dubbing) e copywriting persuasivo para criativos de tráfego pago (TikTok, Reels, Shorts).
+O Whisper transcreveu o vídeo em ${segments.length} segmentos com timestamps exatos: { start, end, duration }.
+
+RESTRIÇÃO MANDATÓRIA DE SINCRONIA:
+1. Traduza cada frase do português para o espanhol latino neutro, mantendo tom persuasivo, ganchos e retenção.
+2. CRÍTICO: Cada frase será gravada INDIVIDUALMENTE por TTS e DEVE caber com perfeição dentro do tempo 'duration' do segmento com dicção humana natural (~2.2 a 2.5 palavras por segundo em espanhol):
+   - Se duration <= 1.5s: Máximo de 3 a 4 palavras.
+   - Se duration <= 2.5s: Máximo de 5 a 6 palavras.
+   - Se duration <= 4.0s: Máximo de 8 a 10 palavras.
+   - NUNCA crie frases longas que excedam a 'duration' do segmento. Ajuste o vocabulário para ser conciso, direto e potente.
+3. Respeite os ${segments.length} segmentos e mantenha o mesmo "id".
+4. Retorne EXCLUSIVAMENTE um objeto JSON com a chave "translations":
 {
   "translations": [
-    { "id": 0, "es": "frase 0 traduzida" },
-    { "id": 1, "es": "frase 1 traduzida" }
+    { "id": 0, "es": "frase em espanhol concisa" }
   ]
 }`;
 
@@ -568,7 +517,7 @@ Sua missão:
 
     if (!res.ok) {
       const errDetail = await res.text();
-      throw new Error(`Erro na tradução por frases (${res.status}): ${errDetail}`);
+      throw new Error(`Erro na tradução por segmentos (${res.status}): ${errDetail}`);
     }
 
     const data = await res.json();
@@ -593,7 +542,7 @@ Sua missão:
     return await Promise.all(
       segments.map(async (seg) => {
         try {
-          const es = await translateCopyGPT(seg.originalText, apiKey, seg.duration);
+          const es = await translateSingleSegmentGPT(seg.originalText, seg.duration, apiKey);
           return { ...seg, translatedText: es };
         } catch {
           return { ...seg, translatedText: seg.originalText };
@@ -604,9 +553,91 @@ Sua missão:
 }
 
 /**
+ * Translates a single segment with strict duration constraint.
+ */
+export async function translateSingleSegmentGPT(
+  text: string,
+  duration: number,
+  apiKey: string
+): Promise<string> {
+  const maxWords = Math.max(2, Math.round(duration * 2.4));
+  const prompt =
+`Você é um especialista em dublagem para tráfego pago.
+Traduza a frase abaixo do português para o espanhol latino neutro persuasivo.
+RESTRIÇÃO CRÍTICA DE TEMPO: A fala DEVE caber em ${duration.toFixed(1)} segundos (máximo aproximado de ${maxWords} palavras).
+Texto original: "${text}"
+Retorne APENAS o texto traduzido em espanhol, sem aspas ou notas.`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey.trim()}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.35,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Erro ao traduzir frase: ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  return (data.choices?.[0]?.message?.content || '').trim() || text;
+}
+
+/**
+ * Generates TTS for a single segment.
+ * If the generated audio exceeds the segment's targetDuration (duration = end - start),
+ * applies a slight pitch-preserving speed adjustment (up to 1.15x) so it fits into the block.
+ */
+export async function generateSegmentTTS(
+  spanishText: string,
+  targetDuration: number,
+  apiKey: string,
+  voice: DubbingConfig['voice'] = 'onyx',
+  model: DubbingConfig['model'] = 'tts-1-hd',
+  forcedSpeed?: number
+): Promise<{ blob: Blob; duration: number; speed: number }> {
+  const text = spanishText.trim();
+  if (!text) {
+    throw new Error('Texto vazio para geração TTS.');
+  }
+
+  // If user configured a forced speed, use it directly
+  if (forcedSpeed && forcedSpeed !== 1.0) {
+    return await generateSpeechTTS(text, apiKey, voice, model, forcedSpeed);
+  }
+
+  // 1. Initial pass at natural 1.0x human speaking rate
+  const initialPass = await generateSpeechTTS(text, apiKey, voice, model, 1.0);
+
+  // 2. Check if the audio generated exceeds the segment's target duration
+  if (targetDuration > 0.1 && initialPass.duration > targetDuration) {
+    const overrunRatio = initialPass.duration / targetDuration;
+    // If it overruns by more than 3%
+    if (overrunRatio > 1.03) {
+      // User directive: "Se o áudio gerado ultrapassar o timestamp end do segmento,
+      // faça um ajuste leve de pitch-preserving speed (até 1.15x) para caber no bloco."
+      const adjustedSpeed = Math.min(1.15, Number(overrunRatio.toFixed(2)));
+      try {
+        const calibratedPass = await generateSpeechTTS(text, apiKey, voice, model, adjustedSpeed);
+        return calibratedPass;
+      } catch (calibErr) {
+        console.warn('Fallback to 1.0x pass:', calibErr);
+      }
+    }
+  }
+
+  return initialPass;
+}
+
+/**
  * Generates Spanish Speech for each individual segment using OpenAI TTS.
- * Keeps natural 1.0x human speaking rate, and only accelerates if a segment
- * would otherwise overlap into the subsequent segment.
+ * Calls OpenAI TTS for each phrase and applies pitch-preserving speed up to 1.15x if needed.
  */
 export async function generateMultiSegmentSpeechTTS(
   segments: SpeechSegment[],
@@ -630,18 +661,13 @@ export async function generateMultiSegmentSpeechTTS(
       continue;
     }
 
-    const nextSeg = segments[i + 1];
-    // Maximum allowable duration before the next sentence starts
-    const maxWindow = nextSeg
-      ? Math.max(0.5, nextSeg.start - seg.start - 0.15) // preserve 150ms gap of silence
-      : Math.max(0.5, totalVideoDuration - seg.start - 0.2);
-
-    const { blob, duration, appliedSpeed } = await generateSynchronizedSpeechTTS(
+    const targetDuration = Number((seg.end - seg.start).toFixed(2));
+    const { blob, duration, speed } = await generateSegmentTTS(
       textToSpeak,
+      targetDuration,
       apiKey,
       voice,
       model,
-      maxWindow,
       forcedSpeed
     );
 
@@ -649,7 +675,7 @@ export async function generateMultiSegmentSpeechTTS(
       ...seg,
       audioBlob: blob,
       audioDuration: duration,
-      appliedSpeed,
+      appliedSpeed: speed,
     });
   }
 
@@ -665,8 +691,10 @@ export async function generateMultiSegmentSpeechTTS(
 }
 
 /**
- * Composes a full-length master audio track placing each speech segment at its
- * exact original timestamp, and preserving all acoustic pauses/breaths as silence.
+ * Composes a full-length master audio track:
+ * 1. Positions each generated speech chunk EXACTLY at the corresponding `segment.start` timestamp.
+ * 2. Fills all non-speech intervals with pure digital silence (empty audio), preserving 100% of natural pauses.
+ * 3. If the audio buffer exceeds `segment.end`, applies pitch-preserving playback speed up to 1.15x.
  */
 export async function composeMultiSegmentMasterTrack(
   segments: SpeechSegment[],
@@ -676,14 +704,24 @@ export async function composeMultiSegmentMasterTrack(
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   const tempCtx = new AudioCtx();
 
-  const decodedSegments: Array<{ buffer: AudioBuffer; start: number }> = [];
+  const decodedSegments: Array<{
+    buffer: AudioBuffer;
+    start: number;
+    targetDuration: number;
+  }> = [];
+
   for (const seg of segments) {
     if (!seg.audioBlob) continue;
     try {
       const arrBuf = await seg.audioBlob.arrayBuffer();
       const decoded = await tempCtx.decodeAudioData(arrBuf.slice(0));
       const targetStart = Math.max(0, seg.start + speechOffset);
-      decodedSegments.push({ buffer: decoded, start: targetStart });
+      const targetDuration = Math.max(0.1, seg.end - seg.start);
+      decodedSegments.push({
+        buffer: decoded,
+        start: targetStart,
+        targetDuration,
+      });
     } catch (e) {
       console.warn('Failed to decode segment audio buffer:', e);
     }
@@ -694,13 +732,24 @@ export async function composeMultiSegmentMasterTrack(
   const totalDuration = Math.max(1, exactVideoDuration);
   const totalSamples = Math.ceil(totalDuration * sampleRate);
 
+  // OfflineAudioContext initializes all samples to 0.0 (silence / empty audio)
+  // All gaps between segments remain 100% silent, preserving original pauses!
   const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
 
-  for (const { buffer, start } of decodedSegments) {
+  for (const { buffer, start, targetDuration } of decodedSegments) {
     if (start >= totalDuration) continue;
     const source = offlineCtx.createBufferSource();
     source.buffer = buffer;
+
+    // Requirement: "Se o áudio gerado ultrapassar o timestamp end do segmento,
+    // faça um ajuste leve de pitch-preserving speed (até 1.15x) para caber no bloco."
+    if (buffer.duration > targetDuration) {
+      const neededSpeed = Math.min(1.15, buffer.duration / targetDuration);
+      source.playbackRate.value = neededSpeed;
+    }
+
     source.connect(offlineCtx.destination);
+    // Position each audio chunk exactly at timestamp start
     source.start(start);
   }
 

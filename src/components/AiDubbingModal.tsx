@@ -32,6 +32,7 @@ import {
   saveStoredDubbingConfig,
   extractAudioFromVideoBlob,
   transcribeAudioWhisper,
+  extractWhisperSegments,
   processAndGroupWhisperSegments,
   translateSegmentsGPT,
   generateMultiSegmentSpeechTTS,
@@ -180,11 +181,11 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
 
     // Reset steps
     setStepStatuses([
-      { step: 1, title: 'Extraindo áudio e detectando pausas', status: 'pending' },
-      { step: 2, title: 'Transcrevendo áudio e mapeando frases (Whisper)', status: 'pending' },
-      { step: 3, title: 'Traduzindo frases para o tempo do vídeo (GPT-4o-mini)', status: 'pending' },
-      { step: 4, title: 'Gerando voz natural com pausas respeitadas (TTS)', status: 'pending' },
-      { step: 5, title: 'Montando vídeo com dublagem sincronizada', status: 'pending' },
+      { step: 1, title: 'Extraindo áudio da gravação', status: 'pending' },
+      { step: 2, title: 'Transcrevendo por segmentos {start, end} (Whisper)', status: 'pending' },
+      { step: 3, title: 'Traduzindo frases com restrição de tempo (GPT-4o-mini)', status: 'pending' },
+      { step: 4, title: 'Gerando TTS por frase com ajuste até 1.15x', status: 'pending' },
+      { step: 5, title: 'Montando áudio mestre com pausas em silêncio e vídeo final', status: 'pending' },
     ]);
 
     try {
@@ -201,9 +202,9 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
           : `Áudio analisado (${extraction.totalDuration.toFixed(1)}s)`
       );
 
-      // Step 2: Transcribe Whisper with speech timing, segment timestamps and acoustic VAD
+      // Step 2: Transcribe Whisper with verbose_json and timestamp_granularities: ["segment"]
       setCurrentStep(2);
-      updateStep(2, 'in-progress', 'Mapeando frases e pausas de respiração no áudio...');
+      updateStep(2, 'in-progress', 'Mapeando segmentos temporais com Whisper (/v1/audio/transcriptions)...');
       const transResult = await transcribeAudioWhisper(extraction.audioBlob, config.apiKey, extraction.vad);
       if (!transResult.text) {
         throw new Error('Nenhuma fala detectada no vídeo. Certifique-se de que o microfone estava ativo durante a gravação.');
@@ -216,35 +217,34 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         recording.duration > 0 ? recording.duration : extraction.totalDuration
       );
 
-      // Extract and group phrases, isolating natural human pauses (>=0.45s)
-      const groupedSegments = processAndGroupWhisperSegments(
+      // Extract Whisper segments: { id, start, end, duration = end - start, originalText }
+      const segments = extractWhisperSegments(
         transResult.segments,
         transResult.text,
-        exactVideoDuration,
-        extraction.vad
+        exactVideoDuration
       );
-      setSpeechSegments(groupedSegments);
+      setSpeechSegments(segments);
 
-      const pauseCount = Math.max(0, groupedSegments.length - 1);
+      const pauseCount = Math.max(0, segments.length - 1);
       updateStep(
         2,
         'completed',
-        `${groupedSegments.length} frase(s) detectada(s) | ${pauseCount} pausa(s) interna(s) mapeada(s)`
+        `${segments.length} segmento(s) mapeado(s) {start, end} | ${pauseCount} pausa(s) natural(is)`
       );
 
-      // Step 3: Translate with GPT-4o-mini phrase-by-phrase adapting word length to time window
+      // Step 3: Translate with GPT-4o-mini phrase-by-phrase with duration constraint
       setCurrentStep(3);
-      updateStep(3, 'in-progress', 'Adaptando cada frase em espanhol ao tempo exato do vídeo...');
-      const translatedSegments = await translateSegmentsGPT(groupedSegments, config.apiKey, exactVideoDuration);
+      updateStep(3, 'in-progress', 'Traduzindo frases para caber na duração exata de cada segmento...');
+      const translatedSegments = await translateSegmentsGPT(segments, config.apiKey, exactVideoDuration);
       setSpeechSegments(translatedSegments);
 
       const fullSpanishText = translatedSegments.map((s) => s.translatedText || s.originalText).join(' ');
       setTranslatedTextEs(fullSpanishText);
-      updateStep(3, 'completed', `${translatedSegments.length} frase(s) adaptada(s) com precisão de ritmo`);
+      updateStep(3, 'completed', `${translatedSegments.length} frase(s) traduzida(s) no tempo exato`);
 
-      // Step 4: Generate Voice for each segment with OpenAI TTS (Natural 1.0x rate)
+      // Step 4: Generate Voice for each segment with OpenAI TTS (1.0x or slight pitch-preserving speed up to 1.15x)
       setCurrentStep(4);
-      updateStep(4, 'in-progress', 'Gerando voz natural em 1.0x para cada frase...');
+      updateStep(4, 'in-progress', 'Gerando áudio TTS por frase com ajuste até 1.15x se necessário...');
       const ttsResult = await generateMultiSegmentSpeechTTS(
         translatedSegments,
         config.apiKey,
@@ -258,12 +258,12 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       updateStep(
         4,
         'completed',
-        `${ttsResult.segments.length} frase(s) gerada(s) em 1.0x (Pausas preservadas como silêncio)`
+        `${ttsResult.segments.length} áudio(s) gerado(s) individualmente (ajuste leve até 1.15x se ultrapassar)`
       );
 
       // Step 5: Compose master audio track placing phrases at exact timestamps and assemble video
       setCurrentStep(5);
-      updateStep(5, 'in-progress', 'Compondo master com pausas e montando vídeo final...');
+      updateStep(5, 'in-progress', 'Posicionando áudios no start exato e preenchendo pausas com silêncio...');
       setAssemblyProgress(0);
 
       const { masterBlob } = await composeMultiSegmentMasterTrack(
