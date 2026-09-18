@@ -195,42 +195,99 @@ export function detectVoiceActivity(audioBuffer: AudioBuffer): VoiceActivityAnal
 }
 
 /**
+ * Obtains the exact true video duration from the recorded video element.
+ */
+export async function getVideoDuration(videoBlobOrUrl: Blob | string): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    const url = typeof videoBlobOrUrl === 'string' ? videoBlobOrUrl : URL.createObjectURL(videoBlobOrUrl);
+    video.src = url;
+
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onMeta);
+      video.removeEventListener('durationchange', onMeta);
+      video.removeEventListener('error', onError);
+      if (typeof videoBlobOrUrl !== 'string') {
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    const onMeta = () => {
+      const dur = video.duration;
+      if (isFinite(dur) && dur > 0) {
+        cleanup();
+        resolve(dur);
+      }
+    };
+
+    const onError = () => {
+      cleanup();
+      resolve(0);
+    };
+
+    video.addEventListener('loadedmetadata', onMeta);
+    video.addEventListener('durationchange', onMeta);
+    video.addEventListener('error', onError);
+
+    // Timeout safety in case metadata event already fired or is delayed
+    setTimeout(() => {
+      if (video.duration && isFinite(video.duration) && video.duration > 0) {
+        const d = video.duration;
+        cleanup();
+        resolve(d);
+      } else {
+        cleanup();
+        resolve(0);
+      }
+    }, 1500);
+  });
+}
+
+/**
  * Extracts audio from a video blob, analyzes exact video duration and Voice Activity (VAD),
  * and produces a 16kHz Mono WAV ready for OpenAI Whisper.
  */
 export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<AudioExtractionResult> {
+  const trueDuration = await getVideoDuration(videoBlob);
   const arrayBuffer = await videoBlob.arrayBuffer();
   
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   const tempCtx = new AudioContextClass();
   
-  let audioBuffer: AudioBuffer;
+  let audioBuffer: AudioBuffer | null = null;
   try {
     audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
   } catch (decodeErr) {
-    await tempCtx.close();
-    console.warn('Direct decodeAudioData failed, sending video blob slice for Whisper:', decodeErr);
-    const sliceBlob = new Blob([videoBlob], { type: 'audio/webm' });
+    console.warn('Direct decodeAudioData failed, using video blob directly for Whisper:', decodeErr);
+  } finally {
+    await tempCtx.close().catch(() => {});
+  }
+
+  if (!audioBuffer) {
+    // Whisper API accepts webm and mp4 videos directly
+    const safeDuration = trueDuration > 0 ? trueDuration : 15;
     return {
-      audioBlob: sliceBlob,
-      totalDuration: 10,
+      audioBlob: videoBlob,
+      totalDuration: safeDuration,
       vad: {
         speechStartTime: 0,
-        speechEndTime: 10,
-        speechDuration: 10,
-        totalDuration: 10,
+        speechEndTime: safeDuration,
+        speechDuration: safeDuration,
+        totalDuration: safeDuration,
         hasLeadingPause: false,
       },
     };
   }
-  await tempCtx.close();
 
   // Run acoustic Voice Activity Detection
   const vad = detectVoiceActivity(audioBuffer);
+  const totalDuration = trueDuration > 0 ? trueDuration : audioBuffer.duration;
 
   // Resample to 16kHz Mono WAV for Whisper
   const targetSampleRate = 16000;
-  const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
+  const offlineCtx = new OfflineAudioContext(1, Math.ceil(totalDuration * targetSampleRate), targetSampleRate);
   const source = offlineCtx.createBufferSource();
   source.buffer = audioBuffer;
   source.connect(offlineCtx.destination);
@@ -241,7 +298,7 @@ export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<AudioE
 
   return {
     audioBlob: wavBlob,
-    totalDuration: audioBuffer.duration,
+    totalDuration,
     vad,
   };
 }
@@ -347,33 +404,34 @@ export async function transcribeAudioWhisper(
   const text = (data.text || '').trim();
   const duration = Number(data.duration) || vadHint?.totalDuration || 0;
 
-  // Extract raw segments with { start, end, text } directly from Whisper
-  const segments: Array<{ start: number; end: number; text: string }> = Array.isArray(data.segments)
-    ? data.segments
-        .filter((s: any) => s && typeof s.text === 'string' && s.text.trim().length > 0)
-        .map((s: any) => ({
-          start: Math.max(0, Number(Number(s.start ?? 0).toFixed(2))),
-          end: Math.max(0.1, Number(Number(s.end ?? 0).toFixed(2))),
-          text: String(s.text || '').trim(),
-        }))
-    : [];
+  // 1. Tratar o Whisper: iterar por TODOS os itens de data.segments sem interrupção
+  const rawSegments = Array.isArray(data.segments) ? data.segments : [];
+  const segments: Array<{ start: number; end: number; text: string }> = [];
 
-  let speechStartTime = vadHint?.speechStartTime ?? 0;
-  let speechEndTime = vadHint?.speechEndTime ?? duration;
-
-  // Cross-verify with Whisper segments if available
-  if (segments.length > 0) {
-    const whisperStart = segments[0].start;
-    const whisperEnd = Math.max(whisperStart + 0.3, segments[segments.length - 1].end);
-
-    if (vadHint && vadHint.speechStartTime >= 0.5) {
-      speechStartTime = vadHint.speechStartTime;
-    } else if (whisperStart > 0.3) {
-      speechStartTime = whisperStart;
-    }
-    speechEndTime = Math.max(speechStartTime + 0.5, whisperEnd);
+  for (let i = 0; i < rawSegments.length; i++) {
+    const s = rawSegments[i];
+    const segText = String(s.text || '').trim();
+    if (!segText) continue;
+    const start = Math.max(0, Number(Number(s.start ?? 0).toFixed(2)));
+    const end = Math.max(start + 0.1, Number(Number(s.end ?? (start + 0.5)).toFixed(2)));
+    segments.push({
+      start,
+      end,
+      text: segText,
+    });
   }
 
+  // Se data.segments vier vazio mas houver texto completo, cria segmento único cobrindo o texto
+  if (segments.length === 0 && text) {
+    segments.push({
+      start: 0,
+      end: duration > 0 ? duration : 10,
+      text,
+    });
+  }
+
+  const speechStartTime = segments.length > 0 ? segments[0].start : (vadHint?.speechStartTime ?? 0);
+  const speechEndTime = segments.length > 0 ? segments[segments.length - 1].end : duration;
   const speechDuration = Math.max(0.5, speechEndTime - speechStartTime);
   const wordCount = text.split(/\s+/).filter(Boolean).length;
 
@@ -529,26 +587,45 @@ RESTRIÇÃO MANDATÓRIA DE SINCRONIA:
       ? parsed
       : [];
 
-    return segments.map((seg) => {
+    const translatedList: SpeechSegment[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
       const match = transList.find((t) => t.id === seg.id);
-      const translatedText = match?.es ? String(match.es).trim() : seg.originalText;
-      return {
-        ...seg,
-        translatedText,
-      };
-    });
-  } catch (err) {
-    console.warn('Fallback: translating segments individually:', err);
-    return await Promise.all(
-      segments.map(async (seg) => {
+      let es = match?.es ? String(match.es).trim() : '';
+
+      // If missing from batch, translate individually
+      if (!es) {
         try {
-          const es = await translateSingleSegmentGPT(seg.originalText, seg.duration, apiKey);
-          return { ...seg, translatedText: es };
+          es = await translateSingleSegmentGPT(seg.originalText, seg.duration, apiKey);
+          await new Promise((r) => setTimeout(r, 60));
         } catch {
-          return { ...seg, translatedText: seg.originalText };
+          es = seg.originalText;
         }
-      })
-    );
+      }
+
+      translatedList.push({
+        ...seg,
+        translatedText: es,
+      });
+    }
+
+    return translatedList;
+  } catch (err) {
+    console.warn('Fallback: translating segments sequentially with rate limit protection:', err);
+    const fallbackResults: SpeechSegment[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      try {
+        const es = await translateSingleSegmentGPT(seg.originalText, seg.duration, apiKey);
+        fallbackResults.push({ ...seg, translatedText: es });
+      } catch {
+        fallbackResults.push({ ...seg, translatedText: seg.originalText });
+      }
+      if (i < segments.length - 1) {
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    }
+    return fallbackResults;
   }
 }
 
@@ -677,6 +754,11 @@ export async function generateMultiSegmentSpeechTTS(
       audioDuration: duration,
       appliedSpeed: speed,
     });
+
+    // Small delay between calls to avoid hitting rate limits
+    if (i < segments.length - 1) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
 
   const totalVoiceDuration = updatedSegments.reduce((sum, s) => sum + (s.audioDuration ?? 0), 0);
@@ -691,74 +773,102 @@ export async function generateMultiSegmentSpeechTTS(
 }
 
 /**
- * Composes a full-length master audio track:
- * 1. Positions each generated speech chunk EXACTLY at the corresponding `segment.start` timestamp.
- * 2. Fills all non-speech intervals with pure digital silence (empty audio), preserving 100% of natural pauses.
- * 3. If the audio buffer exceeds `segment.end`, applies pitch-preserving playback speed up to 1.15x.
+ * Web Audio API com AudioBufferTimeline:
+ * 1. Obtenha a duração total exata do vídeo original gravado (videoElement.duration).
+ * 2. Crie um AudioContext e instancie um buffer final vazio com a mesma duração do vídeo:
+ *    const finalBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * videoDuration, audioCtx.sampleRate);
+ * 3. Posicionamento Absoluto por Timestamp:
+ *    a) Decodifique o áudio MP3 retornado pelo TTS para um AudioBuffer individual.
+ *    b) Copie as amostras PCM desse buffer individual para dentro do finalBuffer
+ *       iniciando estritamente no índice Math.floor(segment.start * audioCtx.sampleRate).
+ *    c) Nunca empurre áudios em fila sequencial. O timestamp de início do Whisper manda onde o som é inserido.
+ *       Os intervalos vazios continuam como silêncio absoluto.
+ * 4. Exportação:
+ *    Renderize o finalBuffer completo via OfflineAudioContext para um arquivo WAV e aplique na tag de vídeo.
+ */
+export async function buildAudioBufferTimeline(
+  segments: SpeechSegment[],
+  videoDuration: number
+): Promise<{ finalBuffer: AudioBuffer; wavBlob: Blob; duration: number }> {
+  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+  const audioCtx = new AudioCtx({ sampleRate: 44100 });
+  const sampleRate = audioCtx.sampleRate;
+  const safeVideoDuration = Math.max(0.5, videoDuration);
+  const totalSamples = Math.ceil(sampleRate * safeVideoDuration);
+
+  // 2. Buffer final vazio com a mesma duração do vídeo (2 canais estéreo para áudio cristalino em fones)
+  const finalBuffer = audioCtx.createBuffer(2, totalSamples, sampleRate);
+  const leftChannel = finalBuffer.getChannelData(0);
+  const rightChannel = finalBuffer.getChannelData(1);
+
+  // 3. Posicionamento Absoluto por Timestamp
+  for (const seg of segments) {
+    if (!seg.audioBlob) continue;
+
+    try {
+      const arrBuf = await seg.audioBlob.arrayBuffer();
+      // a) Decodifique o áudio MP3 retornado pelo TTS para um AudioBuffer individual
+      const segAudioBuffer = await audioCtx.decodeAudioData(arrBuf.slice(0));
+
+      // b) Copie as amostras PCM desse buffer individual para dentro do finalBuffer
+      // iniciando estritamente no índice Math.floor(segment.start * audioCtx.sampleRate)
+      const startIndex = Math.floor(seg.start * sampleRate);
+      const segLeft = segAudioBuffer.getChannelData(0);
+      const segRight = segAudioBuffer.numberOfChannels > 1 ? segAudioBuffer.getChannelData(1) : segLeft;
+
+      for (let i = 0; i < segAudioBuffer.length; i++) {
+        const destIndex = startIndex + i;
+        if (destIndex >= totalSamples) break;
+
+        // Copia amostras PCM no ponto exato da linha do tempo com clamping
+        leftChannel[destIndex] = Math.max(-1, Math.min(1, leftChannel[destIndex] + segLeft[i]));
+        rightChannel[destIndex] = Math.max(-1, Math.min(1, rightChannel[destIndex] + segRight[i]));
+      }
+      // c) Nunca empurre áudios em fila sequencial. O timestamp de início do Whisper manda onde o som é inserido.
+      // Os intervalos vazios continuam como silêncio absoluto (0.0).
+    } catch (err) {
+      console.warn(`Erro ao decodificar áudio do segmento ${seg.id}:`, err);
+    }
+  }
+
+  await audioCtx.close().catch(() => {});
+
+  // 4. Exportação: Renderize o finalBuffer completo via OfflineAudioContext para um arquivo WAV
+  const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+  const sourceNode = offlineCtx.createBufferSource();
+  sourceNode.buffer = finalBuffer;
+  sourceNode.connect(offlineCtx.destination);
+  sourceNode.start(0);
+
+  const renderedBuffer = await offlineCtx.startRendering();
+  const wavBlob = audioBufferToWavBlob(renderedBuffer);
+
+  return {
+    finalBuffer: renderedBuffer,
+    wavBlob,
+    duration: safeVideoDuration,
+  };
+}
+
+/**
+ * Composes a full-length master audio track using buildAudioBufferTimeline.
  */
 export async function composeMultiSegmentMasterTrack(
   segments: SpeechSegment[],
   exactVideoDuration: number,
   speechOffset: number = 0
 ): Promise<{ masterBlob: Blob; duration: number }> {
-  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-  const tempCtx = new AudioCtx();
+  const adjusted = speechOffset !== 0
+    ? segments.map((s) => ({
+        ...s,
+        start: Math.max(0, s.start + speechOffset),
+      }))
+    : segments;
 
-  const decodedSegments: Array<{
-    buffer: AudioBuffer;
-    start: number;
-    targetDuration: number;
-  }> = [];
-
-  for (const seg of segments) {
-    if (!seg.audioBlob) continue;
-    try {
-      const arrBuf = await seg.audioBlob.arrayBuffer();
-      const decoded = await tempCtx.decodeAudioData(arrBuf.slice(0));
-      const targetStart = Math.max(0, seg.start + speechOffset);
-      const targetDuration = Math.max(0.1, seg.end - seg.start);
-      decodedSegments.push({
-        buffer: decoded,
-        start: targetStart,
-        targetDuration,
-      });
-    } catch (e) {
-      console.warn('Failed to decode segment audio buffer:', e);
-    }
-  }
-  await tempCtx.close().catch(() => {});
-
-  const sampleRate = 44100;
-  const totalDuration = Math.max(1, exactVideoDuration);
-  const totalSamples = Math.ceil(totalDuration * sampleRate);
-
-  // OfflineAudioContext initializes all samples to 0.0 (silence / empty audio)
-  // All gaps between segments remain 100% silent, preserving original pauses!
-  const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
-
-  for (const { buffer, start, targetDuration } of decodedSegments) {
-    if (start >= totalDuration) continue;
-    const source = offlineCtx.createBufferSource();
-    source.buffer = buffer;
-
-    // Requirement: "Se o áudio gerado ultrapassar o timestamp end do segmento,
-    // faça um ajuste leve de pitch-preserving speed (até 1.15x) para caber no bloco."
-    if (buffer.duration > targetDuration) {
-      const neededSpeed = Math.min(1.15, buffer.duration / targetDuration);
-      source.playbackRate.value = neededSpeed;
-    }
-
-    source.connect(offlineCtx.destination);
-    // Position each audio chunk exactly at timestamp start
-    source.start(start);
-  }
-
-  const rendered = await offlineCtx.startRendering();
-  const masterWav = audioBufferToWavBlob(rendered);
-
+  const res = await buildAudioBufferTimeline(adjusted, exactVideoDuration);
   return {
-    masterBlob: masterWav,
-    duration: totalDuration,
+    masterBlob: res.wavBlob,
+    duration: res.duration,
   };
 }
 
@@ -1179,13 +1289,36 @@ export async function assembleDubbedVideo(
         reject(err);
       };
 
-      // 5. Start recorder, play video and master audio in absolute sync
-      recorder.start(100);
-      masterSourceNode.start(0);
-
-      await videoEl.play().catch((playErr) => {
-        console.warn('Video element play() was restricted, continuing frame capture:', playErr);
+      // 5. Start recorder, play video and master audio in absolute sync at frame 0
+      videoEl.currentTime = 0;
+      await new Promise<void>((readyRes) => {
+        let started = false;
+        const onPlaying = () => {
+          if (!started) {
+            started = true;
+            videoEl!.removeEventListener('playing', onPlaying);
+            readyRes();
+          }
+        };
+        videoEl!.addEventListener('playing', onPlaying);
+        videoEl!.play().catch((playErr) => {
+          console.warn('Video element play() caught:', playErr);
+          if (!started) {
+            started = true;
+            readyRes();
+          }
+        });
+        setTimeout(() => {
+          if (!started) {
+            started = true;
+            readyRes();
+          }
+        }, 600);
       });
+
+      // Video playback is active: start master audio source and recorder simultaneously
+      masterSourceNode.start(0);
+      recorder.start(100);
 
       // 6. Video Frame Render Loop: preserves 100% of video frames without cutting
       const renderLoop = () => {

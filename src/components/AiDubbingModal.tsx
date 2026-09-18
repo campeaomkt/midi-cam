@@ -31,6 +31,8 @@ import {
   getStoredDubbingConfig,
   saveStoredDubbingConfig,
   extractAudioFromVideoBlob,
+  getVideoDuration,
+  buildAudioBufferTimeline,
   transcribeAudioWhisper,
   extractWhisperSegments,
   processAndGroupWhisperSegments,
@@ -192,14 +194,24 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       // Step 1: Extract Audio & Detect Voice Activity (VAD)
       setCurrentStep(1);
       updateStep(1, 'in-progress', 'Analisando vídeo e detectando pausas acústicas...');
+      const exactVideoDuration = await getVideoDuration(recording.blob || recording.url);
       const extraction = await extractAudioFromVideoBlob(recording.blob);
       setOriginalAudioBlob(extraction.audioBlob);
+      const finalVideoDuration = Math.max(
+        1,
+        exactVideoDuration > 0
+          ? exactVideoDuration
+          : recording.duration > 0
+          ? recording.duration
+          : extraction.totalDuration
+      );
+
       updateStep(
         1,
         'completed',
         extraction.vad.hasLeadingPause
-          ? `Pausa inicial detectada: ${extraction.vad.speechStartTime.toFixed(1)}s (Vídeo total: ${extraction.totalDuration.toFixed(1)}s)`
-          : `Áudio analisado (${extraction.totalDuration.toFixed(1)}s)`
+          ? `Pausa inicial detectada: ${extraction.vad.speechStartTime.toFixed(1)}s (Vídeo total: ${finalVideoDuration.toFixed(1)}s)`
+          : `Áudio analisado (${finalVideoDuration.toFixed(1)}s)`
       );
 
       // Step 2: Transcribe Whisper with verbose_json and timestamp_granularities: ["segment"]
@@ -212,16 +224,11 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       setTranscribedTextPt(transResult.text);
       setTranscriptionInfo(transResult);
 
-      const exactVideoDuration = Math.max(
-        1,
-        recording.duration > 0 ? recording.duration : extraction.totalDuration
-      );
-
       // Extract Whisper segments: { id, start, end, duration = end - start, originalText }
       const segments = extractWhisperSegments(
         transResult.segments,
         transResult.text,
-        exactVideoDuration
+        finalVideoDuration
       );
       setSpeechSegments(segments);
 
@@ -235,7 +242,7 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       // Step 3: Translate with GPT-4o-mini phrase-by-phrase with duration constraint
       setCurrentStep(3);
       updateStep(3, 'in-progress', 'Traduzindo frases para caber na duração exata de cada segmento...');
-      const translatedSegments = await translateSegmentsGPT(segments, config.apiKey, exactVideoDuration);
+      const translatedSegments = await translateSegmentsGPT(segments, config.apiKey, finalVideoDuration);
       setSpeechSegments(translatedSegments);
 
       const fullSpanishText = translatedSegments.map((s) => s.translatedText || s.originalText).join(' ');
@@ -250,7 +257,7 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         config.apiKey,
         config.voice,
         config.model,
-        exactVideoDuration,
+        finalVideoDuration,
         config.speedMode === 'custom' ? config.customSpeed : undefined
       );
       setSpeechSegments(ttsResult.segments);
@@ -261,24 +268,23 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         `${ttsResult.segments.length} áudio(s) gerado(s) individualmente (ajuste leve até 1.15x se ultrapassar)`
       );
 
-      // Step 5: Compose master audio track placing phrases at exact timestamps and assemble video
+      // Step 5: Web Audio API com AudioBufferTimeline
       setCurrentStep(5);
-      updateStep(5, 'in-progress', 'Posicionando áudios no start exato e preenchendo pausas com silêncio...');
+      updateStep(5, 'in-progress', 'Posicionando áudios via AudioBufferTimeline com pausas em silêncio...');
       setAssemblyProgress(0);
 
-      const { masterBlob } = await composeMultiSegmentMasterTrack(
+      const { wavBlob } = await buildAudioBufferTimeline(
         ttsResult.segments,
-        exactVideoDuration,
-        config.speechOffset
+        finalVideoDuration
       );
-      setGeneratedAudioBlob(masterBlob);
+      setGeneratedAudioBlob(wavBlob);
 
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
-        masterBlob,
+        wavBlob,
         {
-          exactVideoDuration,
-          masterAudioBlob: masterBlob,
+          exactVideoDuration: finalVideoDuration,
+          masterAudioBlob: wavBlob,
           speechOffset: config.speechOffset,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
@@ -322,9 +328,14 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     setErrorMessage(null);
     try {
       updateStep(4, 'in-progress', 'Regerando áudio com sincronia de pausas...');
+      const videoDurationMeta = await getVideoDuration(recording.blob || recording.url);
       const exactVideoDuration = Math.max(
         1,
-        recording.duration > 0 ? recording.duration : (transcriptionInfo?.duration ?? 15)
+        videoDurationMeta > 0
+          ? videoDurationMeta
+          : recording.duration > 0
+          ? recording.duration
+          : (transcriptionInfo?.duration ?? 15)
       );
 
       let targetSegments = speechSegments;
@@ -357,13 +368,12 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       setAppliedSpeechSpeed(ttsResult.averageSpeed);
       updateStep(4, 'completed', `${ttsResult.segments.length} frase(s) regerada(s) em 1.0x com pausas`);
 
-      // Re-compose master audio track with all pauses
-      const { masterBlob } = await composeMultiSegmentMasterTrack(
+      // Re-compose master audio track with AudioBufferTimeline
+      const { wavBlob } = await buildAudioBufferTimeline(
         ttsResult.segments,
-        exactVideoDuration,
-        config.speechOffset
+        exactVideoDuration
       );
-      setGeneratedAudioBlob(masterBlob);
+      setGeneratedAudioBlob(wavBlob);
 
       // Re-assemble video
       setIsReassemblingVideo(true);
@@ -371,10 +381,10 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
-        masterBlob,
+        wavBlob,
         {
           exactVideoDuration,
-          masterAudioBlob: masterBlob,
+          masterAudioBlob: wavBlob,
           speechOffset: config.speechOffset,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
