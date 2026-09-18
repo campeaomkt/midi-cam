@@ -20,25 +20,19 @@ import {
   Edit3,
   Gauge,
   Timer,
-  Pause,
-  ListOrdered,
 } from 'lucide-react';
 import {
   DubbingConfig,
   DubbingStepStatus,
   TranscriptionResult,
-  SpeechSegment,
   getStoredDubbingConfig,
   saveStoredDubbingConfig,
   extractAudioFromVideoBlob,
   getVideoDuration,
-  buildAudioBufferTimeline,
   transcribeAudioWhisper,
-  extractWhisperSegments,
-  processAndGroupWhisperSegments,
-  translateSegmentsGPT,
-  generateMultiSegmentSpeechTTS,
-  composeMultiSegmentMasterTrack,
+  translateCopyGPT,
+  generateSpeechTTS,
+  syncAudioByTimeStretching,
   assembleDubbedVideo,
 } from '../utils/aiDubbingService';
 
@@ -74,8 +68,6 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
   const [originalAudioBlob, setOriginalAudioBlob] = useState<Blob | null>(null);
   const [transcribedTextPt, setTranscribedTextPt] = useState<string>('');
   const [translatedTextEs, setTranslatedTextEs] = useState<string>('');
-  const [speechSegments, setSpeechSegments] = useState<SpeechSegment[]>([]);
-  const [scriptViewTab, setScriptViewTab] = useState<'segments' | 'full'>('segments');
   const [generatedAudioBlob, setGeneratedAudioBlob] = useState<Blob | null>(null);
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionResult | null>(null);
   const [appliedSpeechSpeed, setAppliedSpeechSpeed] = useState<number>(1.0);
@@ -149,21 +141,6 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     );
   };
 
-  // Update individual segment translation
-  const handleSegmentTextChange = (id: number, newText: string) => {
-    const updated = speechSegments.map((s) => (s.id === id ? { ...s, translatedText: newText } : s));
-    setSpeechSegments(updated);
-    setTranslatedTextEs(updated.map((s) => s.translatedText || '').join(' '));
-  };
-
-  // Update full text
-  const handleFullTextChange = (newFullText: string) => {
-    setTranslatedTextEs(newFullText);
-    if (speechSegments.length <= 1 && speechSegments.length > 0) {
-      setSpeechSegments([{ ...speechSegments[0], translatedText: newFullText }]);
-    }
-  };
-
   // Full Pipeline Execution
   const handleStartDubbingPipeline = async () => {
     if (!recording) {
@@ -183,17 +160,17 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
 
     // Reset steps
     setStepStatuses([
-      { step: 1, title: 'Extraindo áudio da gravação', status: 'pending' },
-      { step: 2, title: 'Transcrevendo por segmentos {start, end} (Whisper)', status: 'pending' },
-      { step: 3, title: 'Traduzindo frases com restrição de tempo (GPT-4o-mini)', status: 'pending' },
-      { step: 4, title: 'Gerando TTS por frase com ajuste até 1.15x', status: 'pending' },
-      { step: 5, title: 'Montando áudio mestre com pausas em silêncio e vídeo final', status: 'pending' },
+      { step: 1, title: 'Extraindo áudio do vídeo gravado', status: 'pending' },
+      { step: 2, title: 'Transcrição Única do áudio (Whisper)', status: 'pending' },
+      { step: 3, title: 'Tradução Única da copy para anúncios (GPT-4o-mini)', status: 'pending' },
+      { step: 4, title: 'Geração de Áudio Única (OpenAI TTS)', status: 'pending' },
+      { step: 5, title: 'Sincronização Global por Time-Stretching & Montagem', status: 'pending' },
     ]);
 
     try {
-      // Step 1: Extract Audio & Detect Voice Activity (VAD)
+      // Step 1: Extract Audio & Obtain Exact Video Duration
       setCurrentStep(1);
-      updateStep(1, 'in-progress', 'Analisando vídeo e detectando pausas acústicas...');
+      updateStep(1, 'in-progress', 'Obtendo áudio e duração exata do vídeo gravado...');
       const exactVideoDuration = await getVideoDuration(recording.blob || recording.url);
       const extraction = await extractAudioFromVideoBlob(recording.blob);
       setOriginalAudioBlob(extraction.audioBlob);
@@ -206,78 +183,52 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
           : extraction.totalDuration
       );
 
-      updateStep(
-        1,
-        'completed',
-        extraction.vad.hasLeadingPause
-          ? `Pausa inicial detectada: ${extraction.vad.speechStartTime.toFixed(1)}s (Vídeo total: ${finalVideoDuration.toFixed(1)}s)`
-          : `Áudio analisado (${finalVideoDuration.toFixed(1)}s)`
-      );
+      updateStep(1, 'completed', `Vídeo gravado analisado: ${finalVideoDuration.toFixed(1)}s`);
 
-      // Step 2: Transcribe Whisper with verbose_json and timestamp_granularities: ["segment"]
+      // Step 2: Transcrição Única:
+      // Envie o áudio gravado inteiro para o Whisper (/v1/audio/transcriptions) e pegue o texto completo em string
       setCurrentStep(2);
-      updateStep(2, 'in-progress', 'Mapeando segmentos temporais com Whisper (/v1/audio/transcriptions)...');
+      updateStep(2, 'in-progress', 'Transcrevendo áudio contínuo com Whisper (/v1/audio/transcriptions)...');
       const transResult = await transcribeAudioWhisper(extraction.audioBlob, config.apiKey, extraction.vad);
       if (!transResult.text) {
         throw new Error('Nenhuma fala detectada no vídeo. Certifique-se de que o microfone estava ativo durante a gravação.');
       }
       setTranscribedTextPt(transResult.text);
       setTranscriptionInfo(transResult);
+      updateStep(2, 'completed', `Transcrição completa (${transResult.wordCount} palavras)`);
 
-      // Extract Whisper segments: { id, start, end, duration = end - start, originalText }
-      const segments = extractWhisperSegments(
-        transResult.segments,
-        transResult.text,
-        finalVideoDuration
-      );
-      setSpeechSegments(segments);
-
-      const pauseCount = Math.max(0, segments.length - 1);
-      updateStep(
-        2,
-        'completed',
-        `${segments.length} segmento(s) mapeado(s) {start, end} | ${pauseCount} pausa(s) natural(is)`
-      );
-
-      // Step 3: Translate with GPT-4o-mini phrase-by-phrase with duration constraint
+      // Step 3: Tradução Única:
+      // Envie o texto completo para o GPT-4o-mini com o prompt específico de anúncios
       setCurrentStep(3);
-      updateStep(3, 'in-progress', 'Traduzindo frases para caber na duração exata de cada segmento...');
-      const translatedSegments = await translateSegmentsGPT(segments, config.apiKey, finalVideoDuration);
-      setSpeechSegments(translatedSegments);
+      updateStep(3, 'in-progress', 'Traduzindo copy inteira para espanhol neutro de anúncios (GPT-4o-mini)...');
+      const fullSpanishTranslation = await translateCopyGPT(transResult.text, config.apiKey, finalVideoDuration);
+      setTranslatedTextEs(fullSpanishTranslation);
+      updateStep(3, 'completed', 'Copy traduzida inteira com tom persuasivo e reticências (...)');
 
-      const fullSpanishText = translatedSegments.map((s) => s.translatedText || s.originalText).join(' ');
-      setTranslatedTextEs(fullSpanishText);
-      updateStep(3, 'completed', `${translatedSegments.length} frase(s) traduzida(s) no tempo exato`);
-
-      // Step 4: Generate Voice for each segment with OpenAI TTS (1.0x or slight pitch-preserving speed up to 1.15x)
+      // Step 4: Geração de Áudio Única (OpenAI TTS):
+      // Apenas UMA chamada para /v1/audio/speech com o texto traduzido completo
       setCurrentStep(4);
-      updateStep(4, 'in-progress', 'Gerando áudio TTS por frase com ajuste até 1.15x se necessário...');
-      const ttsResult = await generateMultiSegmentSpeechTTS(
-        translatedSegments,
+      updateStep(4, 'in-progress', `Gerando fala completa em espanhol com OpenAI TTS (${config.voice})...`);
+      const baseSpeed = config.speedMode === 'custom' ? config.customSpeed : 1.0;
+      const ttsResult = await generateSpeechTTS(
+        fullSpanishTranslation,
         config.apiKey,
         config.voice,
         config.model,
-        finalVideoDuration,
-        config.speedMode === 'custom' ? config.customSpeed : undefined
+        baseSpeed
       );
-      setSpeechSegments(ttsResult.segments);
-      setAppliedSpeechSpeed(ttsResult.averageSpeed);
-      updateStep(
-        4,
-        'completed',
-        `${ttsResult.segments.length} áudio(s) gerado(s) individualmente (ajuste leve até 1.15x se ultrapassar)`
-      );
+      setGeneratedAudioBlob(ttsResult.blob);
+      updateStep(4, 'completed', `Áudio contínuo gerado com sucesso (${ttsResult.duration.toFixed(1)}s)`);
 
-      // Step 5: Web Audio API com AudioBufferTimeline
+      // Step 5: Sincronização Global por Time-Stretching (Web Audio):
+      // Decodifica o áudio MP3, calcula a taxa linear decoded.duration / targetDuration,
+      // renderiza em OfflineAudioContext e monta no vídeo.
       setCurrentStep(5);
-      updateStep(5, 'in-progress', 'Posicionando áudios via AudioBufferTimeline com pausas em silêncio...');
+      updateStep(5, 'in-progress', 'Calculando proporção linear de tempo e renderizando Time-Stretching...');
       setAssemblyProgress(0);
 
-      const { wavBlob } = await buildAudioBufferTimeline(
-        ttsResult.segments,
-        finalVideoDuration
-      );
-      setGeneratedAudioBlob(wavBlob);
+      const { wavBlob, rate } = await syncAudioByTimeStretching(ttsResult.blob, finalVideoDuration);
+      setAppliedSpeechSpeed(rate);
 
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
@@ -285,12 +236,12 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         {
           exactVideoDuration: finalVideoDuration,
           masterAudioBlob: wavBlob,
-          speechOffset: config.speechOffset,
+          speechOffset: 0,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
       );
       setDubbedVideoResult(assembled);
-      updateStep(5, 'completed', `Vídeo dublado pronto! (${assembled.duration}s 100% preservados, início e pausas respeitados)`);
+      updateStep(5, 'completed', `Vídeo dublado pronto! (${assembled.duration}s sincronizados perfeitamente)`);
 
       // Notify parent/storage
       const newRec: VideoRecording = {
@@ -316,7 +267,7 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     }
   };
 
-  // Regenerate TTS if user edited translatedTextEs or segments
+  // Regenerate TTS if user edited translatedTextEs
   const handleRegenerateTTS = async () => {
     if (!config.apiKey) {
       setShowConfigPanel(true);
@@ -324,10 +275,16 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       return;
     }
 
+    const textToUse = translatedTextEs.trim() || transcribedTextPt.trim();
+    if (!textToUse) {
+      setErrorMessage('Digite ou transcreva um texto antes de regerar o áudio.');
+      return;
+    }
+
     setIsRegeneratingTTS(true);
     setErrorMessage(null);
     try {
-      updateStep(4, 'in-progress', 'Regerando áudio com sincronia de pausas...');
+      updateStep(4, 'in-progress', 'Regerando áudio único do texto traduzido...');
       const videoDurationMeta = await getVideoDuration(recording.blob || recording.url);
       const exactVideoDuration = Math.max(
         1,
@@ -338,59 +295,37 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
           : (transcriptionInfo?.duration ?? 15)
       );
 
-      let targetSegments = speechSegments;
-      if (targetSegments.length === 0) {
-        const textToUse = translatedTextEs.trim() || transcribedTextPt;
-        if (!textToUse) {
-          throw new Error('Nenhum texto para narrar.');
-        }
-        targetSegments = [
-          {
-            id: 0,
-            start: transcriptionInfo?.speechStartTime ?? 0,
-            end: transcriptionInfo?.speechEndTime ?? exactVideoDuration,
-            duration: Math.max(1, exactVideoDuration - (transcriptionInfo?.speechStartTime ?? 0)),
-            originalText: transcribedTextPt,
-            translatedText: textToUse,
-          },
-        ];
-      }
-
-      const ttsResult = await generateMultiSegmentSpeechTTS(
-        targetSegments,
+      const baseSpeed = config.speedMode === 'custom' ? config.customSpeed : 1.0;
+      const ttsResult = await generateSpeechTTS(
+        textToUse,
         config.apiKey,
         config.voice,
         config.model,
-        exactVideoDuration,
-        config.speedMode === 'custom' ? config.customSpeed : undefined
+        baseSpeed
       );
-      setSpeechSegments(ttsResult.segments);
-      setAppliedSpeechSpeed(ttsResult.averageSpeed);
-      updateStep(4, 'completed', `${ttsResult.segments.length} frase(s) regerada(s) em 1.0x com pausas`);
+      setGeneratedAudioBlob(ttsResult.blob);
+      updateStep(4, 'completed', `Áudio regerado (${ttsResult.duration.toFixed(1)}s)`);
 
-      // Re-compose master audio track with AudioBufferTimeline
-      const { wavBlob } = await buildAudioBufferTimeline(
-        ttsResult.segments,
-        exactVideoDuration
-      );
-      setGeneratedAudioBlob(wavBlob);
-
-      // Re-assemble video
+      // Time-stretching
       setIsReassemblingVideo(true);
-      updateStep(5, 'in-progress', 'Remontando vídeo final com novo áudio sincronizado...');
+      updateStep(5, 'in-progress', 'Sincronizando áudio com time-stretching e remontando vídeo...');
       setAssemblyProgress(0);
+
+      const { wavBlob, rate } = await syncAudioByTimeStretching(ttsResult.blob, exactVideoDuration);
+      setAppliedSpeechSpeed(rate);
+
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
         wavBlob,
         {
           exactVideoDuration,
           masterAudioBlob: wavBlob,
-          speechOffset: config.speechOffset,
+          speechOffset: 0,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
       );
       setDubbedVideoResult(assembled);
-      updateStep(5, 'completed', `Vídeo dublado atualizado! (${assembled.duration}s 100% preservados)`);
+      updateStep(5, 'completed', `Vídeo dublado atualizado! (${assembled.duration}s sincronizados)`);
 
       const newRec: VideoRecording = {
         id: `dubbed-${Date.now()}`,
@@ -725,160 +660,62 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
           )}
         </div>
 
-        {/* Copy Comparison & Adjustment Area with Phrase/Pause Synchronization */}
-        {(transcribedTextPt || translatedTextEs || speechSegments.length > 0) && (
+        {/* Copy Comparison & Adjustment Area with Continuous Single Flow */}
+        {(transcribedTextPt || translatedTextEs) && (
           <div className="flex flex-col gap-3 bg-zinc-900/80 p-4 rounded-xl border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.08)]">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
               <div className="flex items-center gap-2">
                 <Languages className="w-4 h-4 text-cyan-400" />
-                <span className="text-sm font-bold text-white">Sincronização de Falas e Pausas</span>
-                {speechSegments.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-500/40 text-[11px] font-bold text-cyan-300">
-                    {speechSegments.length} Frases • {Math.max(0, speechSegments.length - 1)} Pausa(s) Interna(s)
-                  </span>
-                )}
+                <span className="text-sm font-bold text-white">Copy e Tradução Completa (Fluxo Único)</span>
               </div>
-
-              {/* Toggle view: Segments vs Full */}
-              <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-white/10 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setScriptViewTab('segments')}
-                  className={`px-3 py-1 rounded-md font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    scriptViewTab === 'segments'
-                      ? 'bg-cyan-500 text-black shadow'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <ListOrdered className="w-3.5 h-3.5" />
-                  <span>Por Frases & Pausas</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScriptViewTab('full')}
-                  className={`px-3 py-1 rounded-md font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    scriptViewTab === 'full'
-                      ? 'bg-cyan-500 text-black shadow'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Texto Completo</span>
-                </button>
-              </div>
+              <span className="text-[11px] text-zinc-400">
+                Texto contínuo sem fatiamento • Reticências (...) para pausas
+              </span>
             </div>
 
-            {scriptViewTab === 'segments' && speechSegments.length > 0 ? (
-              <div className="flex flex-col gap-3 max-h-[360px] overflow-y-auto pr-1">
-                {speechSegments.map((seg, idx) => {
-                  const nextSeg = speechSegments[idx + 1];
-                  const pauseAfter = nextSeg ? Math.max(0, nextSeg.start - seg.end) : 0;
-
-                  return (
-                    <React.Fragment key={seg.id}>
-                      {/* Segment Card */}
-                      <div className="flex flex-col gap-2 p-3 rounded-lg bg-black/60 border border-white/10">
-                        <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold text-[10px]">
-                              Frase #{idx + 1}
-                            </span>
-                            <span className="text-[11px] font-mono text-cyan-300 flex items-center gap-1">
-                              <Timer className="w-3 h-3 text-cyan-400" />
-                              <span>
-                                {seg.start.toFixed(1)}s - {seg.end.toFixed(1)}s ({seg.duration.toFixed(1)}s)
-                              </span>
-                            </span>
-                          </div>
-
-                          {idx === 0 && seg.start >= 0.5 && (
-                            <span className="text-[10px] text-amber-400/90 font-mono bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/20">
-                              Pausa inicial de {seg.start.toFixed(1)}s respeitada
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Portuguese original phrase */}
-                        <div className="text-[11px] text-zinc-400 italic bg-zinc-950/60 p-2 rounded border border-white/5">
-                          <span className="text-zinc-400 font-semibold not-italic text-[10px] uppercase block mb-0.5">
-                            Original (PT):
-                          </span>
-                          "{seg.originalText}"
-                        </div>
-
-                        {/* Spanish editable phrase */}
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] font-bold text-cyan-400 uppercase">
-                            Copy Espanhol (adaptada ao tempo de {seg.duration.toFixed(1)}s):
-                          </label>
-                          <input
-                            type="text"
-                            value={seg.translatedText || ''}
-                            onChange={(e) => handleSegmentTextChange(seg.id, e.target.value)}
-                            placeholder="Frase traduzida..."
-                            className="w-full bg-black/80 border border-cyan-500/40 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-cyan-400 font-sans"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Natural silence pause indicator between phrases */}
-                      {pauseAfter >= 0.35 && (
-                        <div className="flex items-center justify-center gap-2 py-1 px-3 rounded-md bg-zinc-950/80 border border-dashed border-amber-500/30 text-amber-300 text-[11px] font-mono mx-auto">
-                          <Pause className="w-3 h-3 text-amber-400" />
-                          <span>
-                            Pausa natural de silêncio de {pauseAfter.toFixed(1)}s preservada (nenhum áudio toca aqui)
-                          </span>
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Original Text (PT) */}
-                <div className="flex flex-col gap-2 bg-zinc-950/60 p-3 rounded-xl border border-white/10">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-zinc-300 flex items-center gap-1.5">
-                      <Mic className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Texto Original Transcrito (Português)</span>
-                    </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">Whisper-1</span>
-                  </div>
-                  <textarea
-                    rows={4}
-                    value={transcribedTextPt}
-                    onChange={(e) => setTranscribedTextPt(e.target.value)}
-                    placeholder="Aguardando transcrição do áudio gravado..."
-                    className="w-full bg-black/60 border border-white/10 rounded-lg p-2.5 text-zinc-200 text-xs leading-relaxed focus:outline-none focus:border-amber-400/50 resize-none font-sans"
-                  />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Original Text (PT) */}
+              <div className="flex flex-col gap-2 bg-zinc-950/60 p-3 rounded-xl border border-white/10">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Mic className="w-3.5 h-3.5 text-amber-400" />
+                    <span>1. Transcrição Única (Whisper)</span>
+                  </span>
+                  <span className="text-[10px] text-zinc-400 font-mono">Texto Completo</span>
                 </div>
-
-                {/* Translated Copy (ES) */}
-                <div className="flex flex-col gap-2 bg-zinc-950/60 p-3 rounded-xl border border-cyan-500/30">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-cyan-300 flex items-center gap-1.5">
-                      <Languages className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Copy Traduzida Persuasiva (Espanhol Latino)</span>
-                    </span>
-                    <span className="text-[10px] text-cyan-400/80 font-mono">GPT-4o-mini</span>
-                  </div>
-                  <textarea
-                    rows={4}
-                    value={translatedTextEs}
-                    onChange={(e) => handleFullTextChange(e.target.value)}
-                    placeholder="Tradução em espanhol..."
-                    className="w-full bg-black/60 border border-cyan-400/40 rounded-lg p-2.5 text-white text-xs leading-relaxed focus:outline-none focus:border-cyan-400 resize-none font-sans"
-                  />
-                </div>
+                <textarea
+                  rows={4}
+                  value={transcribedTextPt}
+                  onChange={(e) => setTranscribedTextPt(e.target.value)}
+                  placeholder="Texto transcrito do áudio original gravado..."
+                  className="w-full bg-black/60 border border-white/10 rounded-lg p-2.5 text-zinc-200 text-xs leading-relaxed focus:outline-none focus:border-amber-400/50 resize-none font-sans"
+                />
               </div>
-            )}
+
+              {/* Translated Copy (ES) */}
+              <div className="flex flex-col gap-2 bg-zinc-950/60 p-3 rounded-xl border border-cyan-500/30">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                    <Languages className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>2. Copy Traduzida (GPT-4o-mini Anúncios com ...)</span>
+                  </span>
+                  <span className="text-[10px] text-cyan-400/80 font-mono">Espanhol Neutro</span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={translatedTextEs}
+                  onChange={(e) => setTranslatedTextEs(e.target.value)}
+                  placeholder="Tradução contínua em espanhol..."
+                  className="w-full bg-black/60 border border-cyan-400/40 rounded-lg p-2.5 text-white text-xs leading-relaxed focus:outline-none focus:border-cyan-400 resize-none font-sans"
+                />
+              </div>
+            </div>
 
             {/* Bottom action bar for regeneration */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-white/10">
               <span className="text-[11px] text-zinc-400 flex items-center gap-1">
                 <Edit3 className="w-3 h-3 text-cyan-400" />
-                <span>Você pode ajustar o texto das frases e clicar para regerar áudio mantendo as pausas sincronizadas</span>
+                <span>Edite a copy e clique para regerar o áudio TTS único e aplicar time-stretching</span>
               </span>
               <button
                 type="button"
@@ -890,12 +727,12 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
                 {isRegeneratingTTS || isReassemblingVideo ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Regerando com Pausas...</span>
+                    <span>Regerando Áudio Único...</span>
                   </>
                 ) : (
                   <>
                     <RotateCcw className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Regerar Áudio Sincronizado</span>
+                    <span>Regerar Áudio & Sincronizar</span>
                   </>
                 )}
               </button>
@@ -949,20 +786,11 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
               </span>
               <span className="px-2.5 py-1 rounded-md bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono flex items-center gap-1.5">
                 <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Velocidade da Fala: {appliedSpeechSpeed.toFixed(2)}x (Natural)</span>
+                <span>Proporção Time-Stretching: {appliedSpeechSpeed.toFixed(2)}x</span>
               </span>
-              {transcriptionInfo && (
-                <span className="px-2.5 py-1 rounded-md bg-amber-950/70 border border-amber-500/40 text-amber-300 font-mono flex items-center gap-1.5">
-                  <Timer className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Pausa Inicial: fala aos {transcriptionInfo.speechStartTime.toFixed(1)}s</span>
-                </span>
-              )}
-              {speechSegments.length > 1 && (
-                <span className="px-2.5 py-1 rounded-md bg-purple-950/70 border border-purple-500/40 text-purple-300 font-mono flex items-center gap-1.5">
-                  <Pause className="w-3.5 h-3.5 text-purple-400" />
-                  <span>{speechSegments.length - 1} Pausa(s) Interna(s) Respeitadas</span>
-                </span>
-              )}
+              <span className="px-2.5 py-1 rounded-md bg-zinc-800 text-zinc-300 font-mono">
+                Voz: {config.voice}
+              </span>
             </div>
 
             {/* Video Player */}

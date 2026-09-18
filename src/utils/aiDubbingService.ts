@@ -363,8 +363,8 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Transcribe Audio in Portuguese using OpenAI Whisper API with segment timestamps
- * and acoustic VAD cross-verification.
+ * Transcribe the entire recorded audio at once using OpenAI Whisper API (/v1/audio/transcriptions)
+ * and return the full text as a single continuous string.
  */
 export async function transcribeAudioWhisper(
   audioBlob: Blob,
@@ -378,8 +378,6 @@ export async function transcribeAudioWhisper(
   formData.append('file', file);
   formData.append('model', 'whisper-1');
   formData.append('language', 'pt');
-  formData.append('response_format', 'verbose_json');
-  formData.append('timestamp_granularities[]', 'segment');
 
   const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
@@ -403,46 +401,16 @@ export async function transcribeAudioWhisper(
   const data = await res.json();
   const text = (data.text || '').trim();
   const duration = Number(data.duration) || vadHint?.totalDuration || 0;
-
-  // 1. Tratar o Whisper: iterar por TODOS os itens de data.segments sem interrupção
-  const rawSegments = Array.isArray(data.segments) ? data.segments : [];
-  const segments: Array<{ start: number; end: number; text: string }> = [];
-
-  for (let i = 0; i < rawSegments.length; i++) {
-    const s = rawSegments[i];
-    const segText = String(s.text || '').trim();
-    if (!segText) continue;
-    const start = Math.max(0, Number(Number(s.start ?? 0).toFixed(2)));
-    const end = Math.max(start + 0.1, Number(Number(s.end ?? (start + 0.5)).toFixed(2)));
-    segments.push({
-      start,
-      end,
-      text: segText,
-    });
-  }
-
-  // Se data.segments vier vazio mas houver texto completo, cria segmento único cobrindo o texto
-  if (segments.length === 0 && text) {
-    segments.push({
-      start: 0,
-      end: duration > 0 ? duration : 10,
-      text,
-    });
-  }
-
-  const speechStartTime = segments.length > 0 ? segments[0].start : (vadHint?.speechStartTime ?? 0);
-  const speechEndTime = segments.length > 0 ? segments[segments.length - 1].end : duration;
-  const speechDuration = Math.max(0.5, speechEndTime - speechStartTime);
   const wordCount = text.split(/\s+/).filter(Boolean).length;
 
   const result: TranscriptionResult = {
     text,
     duration,
-    speechStartTime,
-    speechEndTime,
-    speechDuration,
+    speechStartTime: vadHint?.speechStartTime ?? 0,
+    speechEndTime: duration > 0 ? duration : (vadHint?.speechEndTime ?? 0),
+    speechDuration: duration > 0 ? duration : (vadHint?.speechDuration ?? 0),
     wordCount,
-    segments,
+    segments: [{ start: 0, end: duration > 0 ? duration : 10, text }],
     vad: vadHint,
   };
 
@@ -773,18 +741,62 @@ export async function generateMultiSegmentSpeechTTS(
 }
 
 /**
- * Web Audio API com AudioBufferTimeline:
- * 1. Obtenha a duração total exata do vídeo original gravado (videoElement.duration).
- * 2. Crie um AudioContext e instancie um buffer final vazio com a mesma duração do vídeo:
- *    const finalBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * videoDuration, audioCtx.sampleRate);
- * 3. Posicionamento Absoluto por Timestamp:
- *    a) Decodifique o áudio MP3 retornado pelo TTS para um AudioBuffer individual.
- *    b) Copie as amostras PCM desse buffer individual para dentro do finalBuffer
- *       iniciando estritamente no índice Math.floor(segment.start * audioCtx.sampleRate).
- *    c) Nunca empurre áudios em fila sequencial. O timestamp de início do Whisper manda onde o som é inserido.
- *       Os intervalos vazios continuam como silêncio absoluto.
- * 4. Exportação:
- *    Renderize o finalBuffer completo via OfflineAudioContext para um arquivo WAV e aplique na tag de vídeo.
+ * Sincronização Global por Time-Stretching (Web Audio):
+ * 1. Pega a duração exata do vídeo gravado: const targetDuration = videoBlobDuration;
+ * 2. Decodifica o áudio MP3 recebido do OpenAI TTS: const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+ * 3. Calcula a proporção linear de tempo: const rate = decoded.duration / targetDuration;
+ * 4. Cria um OfflineAudioContext com a duração exata do vídeo:
+ *    const offlineCtx = new OfflineAudioContext(1, 44100 * targetDuration, 44100);
+ *    const src = offlineCtx.createBufferSource();
+ *    src.buffer = decoded;
+ *    src.playbackRate.value = rate; // estica/comprime o áudio todo suavemente para casar com o vídeo
+ *    src.connect(offlineCtx.destination);
+ *    src.start(0);
+ *    const syncedBuffer = await offlineCtx.startRendering();
+ * 5. Exporta esse syncedBuffer como áudio final sincronizado em WAV.
+ */
+export async function syncAudioByTimeStretching(
+  audioBlob: Blob,
+  targetDuration: number
+): Promise<{ syncedBuffer: AudioBuffer; wavBlob: Blob; duration: number; rate: number }> {
+  const safeTargetDuration = Math.max(0.5, targetDuration);
+  const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+  const tempCtx = new AudioCtxClass();
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const decoded = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+  await tempCtx.close().catch(() => {});
+
+  // Proporção linear de tempo: decoded.duration / targetDuration
+  // Ex: se o áudio tem 12s e o vídeo tem 10s -> rate = 1.2 (reproduz a 1.2x para caber em 10s)
+  // Ex: se o áudio tem 8s e o vídeo tem 10s -> rate = 0.8 (estica para 10s)
+  const rate = decoded.duration > 0 && safeTargetDuration > 0
+    ? decoded.duration / safeTargetDuration
+    : 1.0;
+
+  const sampleRate = 44100;
+  const totalLength = Math.max(1, Math.round(sampleRate * safeTargetDuration));
+  const numberOfChannels = Math.max(1, decoded.numberOfChannels || 1);
+
+  const offlineCtx = new OfflineAudioContext(numberOfChannels, totalLength, sampleRate);
+  const src = offlineCtx.createBufferSource();
+  src.buffer = decoded;
+  src.playbackRate.value = rate;
+  src.connect(offlineCtx.destination);
+  src.start(0);
+
+  const syncedBuffer = await offlineCtx.startRendering();
+  const wavBlob = audioBufferToWavBlob(syncedBuffer);
+
+  return {
+    syncedBuffer,
+    wavBlob,
+    duration: safeTargetDuration,
+    rate,
+  };
+}
+
+/**
+ * Web Audio API com AudioBufferTimeline (Compatibilidade com pipelines anteriores se necessário)
  */
 export async function buildAudioBufferTimeline(
   segments: SpeechSegment[],
@@ -796,22 +808,18 @@ export async function buildAudioBufferTimeline(
   const safeVideoDuration = Math.max(0.5, videoDuration);
   const totalSamples = Math.ceil(sampleRate * safeVideoDuration);
 
-  // 2. Buffer final vazio com a mesma duração do vídeo (2 canais estéreo para áudio cristalino em fones)
+  // 2. Buffer final vazio com a mesma duração do vídeo
   const finalBuffer = audioCtx.createBuffer(2, totalSamples, sampleRate);
   const leftChannel = finalBuffer.getChannelData(0);
   const rightChannel = finalBuffer.getChannelData(1);
 
-  // 3. Posicionamento Absoluto por Timestamp
+  // 3. Posicionamento por Timestamp
   for (const seg of segments) {
     if (!seg.audioBlob) continue;
 
     try {
       const arrBuf = await seg.audioBlob.arrayBuffer();
-      // a) Decodifique o áudio MP3 retornado pelo TTS para um AudioBuffer individual
       const segAudioBuffer = await audioCtx.decodeAudioData(arrBuf.slice(0));
-
-      // b) Copie as amostras PCM desse buffer individual para dentro do finalBuffer
-      // iniciando estritamente no índice Math.floor(segment.start * audioCtx.sampleRate)
       const startIndex = Math.floor(seg.start * sampleRate);
       const segLeft = segAudioBuffer.getChannelData(0);
       const segRight = segAudioBuffer.numberOfChannels > 1 ? segAudioBuffer.getChannelData(1) : segLeft;
@@ -819,13 +827,9 @@ export async function buildAudioBufferTimeline(
       for (let i = 0; i < segAudioBuffer.length; i++) {
         const destIndex = startIndex + i;
         if (destIndex >= totalSamples) break;
-
-        // Copia amostras PCM no ponto exato da linha do tempo com clamping
         leftChannel[destIndex] = Math.max(-1, Math.min(1, leftChannel[destIndex] + segLeft[i]));
         rightChannel[destIndex] = Math.max(-1, Math.min(1, rightChannel[destIndex] + segRight[i]));
       }
-      // c) Nunca empurre áudios em fila sequencial. O timestamp de início do Whisper manda onde o som é inserido.
-      // Os intervalos vazios continuam como silêncio absoluto (0.0).
     } catch (err) {
       console.warn(`Erro ao decodificar áudio do segmento ${seg.id}:`, err);
     }
@@ -833,7 +837,6 @@ export async function buildAudioBufferTimeline(
 
   await audioCtx.close().catch(() => {});
 
-  // 4. Exportação: Renderize o finalBuffer completo via OfflineAudioContext para um arquivo WAV
   const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
   const sourceNode = offlineCtx.createBufferSource();
   sourceNode.buffer = finalBuffer;
@@ -873,26 +876,20 @@ export async function composeMultiSegmentMasterTrack(
 }
 
 /**
- * Translate Copy from Portuguese to Persuasive Latin American Spanish using GPT-4o-mini.
- * Adapts copy length to fit naturally within the available video duration.
+ * Translate Copy from Portuguese to Persuasive Latin American Spanish using GPT-4o-mini
+ * with the exact advertising copy prompt requested.
  */
 export async function translateCopyGPT(
   originalPortugueseText: string,
   apiKey: string,
   availableTimeWindow?: number
 ): Promise<string> {
-  const wordCount = originalPortugueseText.split(/\s+/).filter(Boolean).length;
-  const timingDirective =
-    availableTimeWindow && availableTimeWindow > 0
-      ? `\n\n[DIRETRIZ DE ADAPTAÇÃO AO VÍDEO]:\nO tempo total disponível para a locução neste vídeo é de ${availableTimeWindow.toFixed(1)} segundos (~${wordCount} palavras no original). A fala em espanhol deve ser fluida, direta e persuasiva, com frases concisas que caibam confortavelmente nesse intervalo de tempo com dicção humana natural, sem correria e sem palavras desnecessárias.`
-      : '';
+  const prompt = `Traduza esta copy para espanhol neutro de anúncios. Mantenha o tom persuasivo e use reticências (...) onde houver pausas naturais. Mantenha a mesma quantidade de palavras para não alterar o ritmo de leitura.
 
-  const systemPrompt =
-    `Você é um especialista em dublagem e localização de criativos de alta conversão para tráfego pago (TikTok, Reels, Shorts), com padrão de naturalidade idêntico ao ElevenLabs.
-Sua missão:
-1. Traduzir e adaptar a fala do vídeo do português para o espanhol latino neutro com máxima fluidez e naturalidade humana.
-2. Manter a energia, tom de voz, ritmo e ganchos persuasivos originais sem soar robótico ou literal.${timingDirective}
-3. Retorne APENAS o texto traduzido final em espanhol, sem introduções, aspas extras ou comentários.`;
+Texto original:
+"${originalPortugueseText}"
+
+Retorne APENAS a copy traduzida inteira em espanhol, sem aspas adicionais, introduções ou notas.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -903,10 +900,13 @@ Sua missão:
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: originalPortugueseText },
+        {
+          role: 'system',
+          content: 'Você é um especialista em tradução e copywriting persuasivo para anúncios em espanhol latino neutro.',
+        },
+        { role: 'user', content: prompt },
       ],
-      temperature: 0.45,
+      temperature: 0.3,
     }),
   });
 
