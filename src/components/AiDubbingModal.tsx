@@ -167,44 +167,58 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     ]);
 
     try {
-      // Step 1: Extract Audio
+      // Step 1: Extract Audio & Detect Voice Activity (VAD)
       setCurrentStep(1);
-      updateStep(1, 'in-progress');
-      const audioBlob = await extractAudioFromVideoBlob(recording.blob);
-      setOriginalAudioBlob(audioBlob);
-      updateStep(1, 'completed');
+      updateStep(1, 'in-progress', 'Analisando vídeo e detectando pausas acústicas...');
+      const extraction = await extractAudioFromVideoBlob(recording.blob);
+      setOriginalAudioBlob(extraction.audioBlob);
+      updateStep(
+        1,
+        'completed',
+        extraction.vad.hasLeadingPause
+          ? `Pausa inicial detectada: ${extraction.vad.speechStartTime.toFixed(1)}s (Duração: ${extraction.totalDuration.toFixed(1)}s)`
+          : `Áudio extraído (${extraction.totalDuration.toFixed(1)}s)`
+      );
 
-      // Step 2: Transcribe Whisper with speech timing detection
+      // Step 2: Transcribe Whisper with speech timing and acoustic VAD
       setCurrentStep(2);
       updateStep(2, 'in-progress');
-      const transResult = await transcribeAudioWhisper(audioBlob, config.apiKey);
+      const transResult = await transcribeAudioWhisper(extraction.audioBlob, config.apiKey, extraction.vad);
       if (!transResult.text) {
         throw new Error('Nenhuma fala detectada no vídeo. Certifique-se de que o microfone estava ativo durante a gravação.');
       }
       setTranscribedTextPt(transResult.text);
       setTranscriptionInfo(transResult);
+
+      const exactVideoDuration = Math.max(
+        1,
+        recording.duration > 0 ? recording.duration : extraction.totalDuration
+      );
+      const effectiveSpeechStart = transResult.speechStartTime;
+      const availableTimeWindow = Math.max(1, exactVideoDuration - effectiveSpeechStart);
+
       updateStep(
         2,
         'completed',
-        `Fala detectada: ${transResult.speechDuration.toFixed(1)}s (Início em ${transResult.speechStartTime.toFixed(1)}s)`
+        `Fala detectada aos ${effectiveSpeechStart.toFixed(1)}s (Pausa respeitada | Janela de fala: ${availableTimeWindow.toFixed(1)}s)`
       );
 
-      // Step 3: Translate with GPT-4o-mini matched to original speech cadence
+      // Step 3: Translate with GPT-4o-mini adapted to the video time window
       setCurrentStep(3);
-      updateStep(3, 'in-progress');
-      const textEs = await translateCopyGPT(transResult.text, config.apiKey, transResult.speechDuration);
+      updateStep(3, 'in-progress', 'Adaptando copy para espanhol natural...');
+      const textEs = await translateCopyGPT(transResult.text, config.apiKey, availableTimeWindow);
       setTranslatedTextEs(textEs);
       updateStep(3, 'completed');
 
-      // Step 4: Generate Voice with OpenAI TTS (Auto-synchronized speech rate)
+      // Step 4: Generate Voice with OpenAI TTS (Natural 1.0x rate)
       setCurrentStep(4);
-      updateStep(4, 'in-progress', 'Calibrando velocidade e cadência da fala...');
+      updateStep(4, 'in-progress', 'Gerando voz natural em espanhol...');
       const { blob: speechBlob, duration: ttsDur, appliedSpeed } = await generateSynchronizedSpeechTTS(
         textEs,
         config.apiKey,
         config.voice,
         config.model,
-        transResult.speechDuration,
+        availableTimeWindow,
         config.speedMode === 'custom' ? config.customSpeed : undefined
       );
       setGeneratedAudioBlob(speechBlob);
@@ -215,21 +229,22 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         `Voz gerada: ${ttsDur.toFixed(1)}s (Velocidade: ${appliedSpeed.toFixed(2)}x)`
       );
 
-      // Step 5: Assemble Dubbed Video in Browser (100% audio replacement & sync)
+      // Step 5: Assemble Dubbed Video in Browser (100% audio replacement & exact duration preserved)
       setCurrentStep(5);
-      updateStep(5, 'in-progress', 'Substituindo áudio original e sincronizando vídeo...');
+      updateStep(5, 'in-progress', 'Montando vídeo final com áudio na sincronia exata...');
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
         recording.blob || recording.url,
         speechBlob,
         {
-          speechStartTime: transResult.speechStartTime,
+          exactVideoDuration,
+          speechStartTime: effectiveSpeechStart,
           speechOffset: config.speechOffset,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
       );
       setDubbedVideoResult(assembled);
-      updateStep(5, 'completed', 'Vídeo dublado com áudio em espanhol sincronizado!');
+      updateStep(5, 'completed', `Vídeo dublado pronto! (${assembled.duration}s 100% preservados)`);
 
       // Notify parent/storage
       const newRec: VideoRecording = {
@@ -271,13 +286,19 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
     setErrorMessage(null);
     try {
       updateStep(4, 'in-progress', 'Regerando áudio com a nova copy...');
-      const targetDuration = transcriptionInfo?.speechDuration;
+      const exactVideoDuration = Math.max(
+        1,
+        recording.duration > 0 ? recording.duration : (transcriptionInfo?.duration ?? 15)
+      );
+      const effectiveSpeechStart = transcriptionInfo?.speechStartTime ?? 0;
+      const availableTimeWindow = Math.max(1, exactVideoDuration - effectiveSpeechStart);
+
       const { blob: speechBlob, duration: ttsDur, appliedSpeed } = await generateSynchronizedSpeechTTS(
         translatedTextEs,
         config.apiKey,
         config.voice,
         config.model,
-        targetDuration,
+        availableTimeWindow,
         config.speedMode === 'custom' ? config.customSpeed : undefined
       );
       setGeneratedAudioBlob(speechBlob);
@@ -292,13 +313,14 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
         recording.blob || recording.url,
         speechBlob,
         {
-          speechStartTime: transcriptionInfo?.speechStartTime ?? 0,
+          exactVideoDuration,
+          speechStartTime: effectiveSpeechStart,
           speechOffset: config.speechOffset,
           onProgress: (pct) => setAssemblyProgress(pct),
         }
       );
       setDubbedVideoResult(assembled);
-      updateStep(5, 'completed', 'Vídeo dublado atualizado!');
+      updateStep(5, 'completed', `Vídeo dublado atualizado! (${assembled.duration}s 100% preservados)`);
 
       const newRec: VideoRecording = {
         id: `dubbed-${Date.now()}`,
@@ -735,16 +757,16 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
               <span className="px-2.5 py-1 rounded-md bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-medium flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Áudio PT 100% substituído por Espanhol</span>
+                <span>Vídeo: {dubbedVideoResult.duration}s (100% Preservado)</span>
               </span>
               <span className="px-2.5 py-1 rounded-md bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 font-mono flex items-center gap-1.5">
                 <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Velocidade de Fala: {appliedSpeechSpeed.toFixed(2)}x</span>
+                <span>Velocidade da Fala: {appliedSpeechSpeed.toFixed(2)}x (Natural)</span>
               </span>
               {transcriptionInfo && (
                 <span className="px-2.5 py-1 rounded-md bg-amber-950/70 border border-amber-500/40 text-amber-300 font-mono flex items-center gap-1.5">
                   <Timer className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Início da Fala: {transcriptionInfo.speechStartTime.toFixed(1)}s (Duração: {transcriptionInfo.speechDuration.toFixed(1)}s)</span>
+                  <span>Pausa Inicial Respeitada: fala aos {transcriptionInfo.speechStartTime.toFixed(1)}s</span>
                 </span>
               )}
             </div>

@@ -12,8 +12,22 @@ export interface DubbingConfig {
   voice: 'onyx' | 'echo' | 'alloy' | 'fable' | 'shimmer' | 'nova';
   model: 'tts-1' | 'tts-1-hd';
   speedMode: 'auto' | 'custom';
-  customSpeed: number; // 0.75 to 1.5
+  customSpeed: number; // 0.85 to 1.3
   speechOffset: number; // fine-tune offset in seconds (-1.0 to 1.0)
+}
+
+export interface VoiceActivityAnalysis {
+  speechStartTime: number; // in seconds (e.g. 2.4s)
+  speechEndTime: number; // in seconds (e.g. 9.5s)
+  speechDuration: number; // in seconds (e.g. 7.1s)
+  totalDuration: number; // total duration of audio in seconds
+  hasLeadingPause: boolean;
+}
+
+export interface AudioExtractionResult {
+  audioBlob: Blob; // WAV mono 16kHz blob for Whisper
+  totalDuration: number; // exact audio length in seconds
+  vad: VoiceActivityAnalysis;
 }
 
 export interface TranscriptionResult {
@@ -24,6 +38,7 @@ export interface TranscriptionResult {
   speechDuration: number; // in seconds (e.g. 8.3s)
   wordCount: number;
   segments: Array<{ start: number; end: number; text: string }>;
+  vad?: VoiceActivityAnalysis;
 }
 
 const STORAGE_KEY = 'midicam_openai_config';
@@ -64,12 +79,115 @@ export function saveStoredDubbingConfig(config: DubbingConfig) {
 }
 
 /**
- * Extracts audio from a video blob as a WAV audio file ready for OpenAI Whisper
+ * High-precision Voice Activity Detection (VAD) analyzing the raw PCM audio samples.
+ * Accurately detects when the speaker begins talking after starting the recording,
+ * preserving natural initial pauses and silences.
  */
-export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<Blob> {
+export function detectVoiceActivity(audioBuffer: AudioBuffer): VoiceActivityAnalysis {
+  const channelData = audioBuffer.getChannelData(0);
+  const sampleRate = audioBuffer.sampleRate;
+  const totalDuration = audioBuffer.duration;
+
+  if (!channelData || channelData.length === 0 || totalDuration <= 0.2) {
+    return {
+      speechStartTime: 0,
+      speechEndTime: totalDuration,
+      speechDuration: totalDuration,
+      totalDuration,
+      hasLeadingPause: false,
+    };
+  }
+
+  // 30ms analysis frames
+  const frameDuration = 0.03;
+  const frameSize = Math.max(1, Math.floor(sampleRate * frameDuration));
+  const frameCount = Math.floor(channelData.length / frameSize);
+
+  if (frameCount < 5) {
+    return {
+      speechStartTime: 0,
+      speechEndTime: totalDuration,
+      speechDuration: totalDuration,
+      totalDuration,
+      hasLeadingPause: false,
+    };
+  }
+
+  const rmsList = new Float32Array(frameCount);
+  for (let f = 0; f < frameCount; f++) {
+    const startIdx = f * frameSize;
+    let sumSquares = 0;
+    for (let s = 0; s < frameSize; s++) {
+      const val = channelData[startIdx + s];
+      sumSquares += val * val;
+    }
+    rmsList[f] = Math.sqrt(sumSquares / frameSize);
+  }
+
+  // Baseline ambient noise (15th percentile)
+  const sorted = Array.from(rmsList).sort((a, b) => a - b);
+  const noiseFloor = Math.max(0.0005, sorted[Math.floor(sorted.length * 0.15)] || 0.001);
+  const peakRms = Math.max(noiseFloor * 2, sorted[Math.floor(sorted.length * 0.95)] || 0.02);
+
+  // Dynamic voice threshold
+  const voiceThreshold = Math.max(0.01, noiseFloor * 2.8, (noiseFloor + peakRms) * 0.18);
+
+  // Scan forward for speech start (at least 3 consecutive frames = 90ms)
+  let startFrame = 0;
+  let consecutiveAbove = 0;
+  let speechFound = false;
+
+  for (let f = 0; f < frameCount; f++) {
+    if (rmsList[f] >= voiceThreshold) {
+      consecutiveAbove++;
+      if (consecutiveAbove >= 3) {
+        startFrame = Math.max(0, f - 3);
+        speechFound = true;
+        break;
+      }
+    } else {
+      consecutiveAbove = 0;
+    }
+  }
+
+  // Scan backwards for speech end
+  let endFrame = frameCount - 1;
+  consecutiveAbove = 0;
+  for (let f = frameCount - 1; f >= 0; f--) {
+    if (rmsList[f] >= voiceThreshold) {
+      consecutiveAbove++;
+      if (consecutiveAbove >= 3) {
+        endFrame = Math.min(frameCount - 1, f + 3);
+        break;
+      }
+    } else {
+      consecutiveAbove = 0;
+    }
+  }
+
+  const speechStartTime = speechFound ? Number((startFrame * frameDuration).toFixed(2)) : 0;
+  const speechEndTime = speechFound
+    ? Number(Math.min(totalDuration, (endFrame + 1) * frameDuration).toFixed(2))
+    : totalDuration;
+  const speechDuration = Math.max(0.5, speechEndTime - speechStartTime);
+  const hasLeadingPause = speechStartTime >= 0.5;
+
+  return {
+    speechStartTime,
+    speechEndTime,
+    speechDuration,
+    totalDuration,
+    hasLeadingPause,
+  };
+}
+
+/**
+ * Extracts audio from a video blob, analyzes exact video duration and Voice Activity (VAD),
+ * and produces a 16kHz Mono WAV ready for OpenAI Whisper.
+ */
+export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<AudioExtractionResult> {
   const arrayBuffer = await videoBlob.arrayBuffer();
   
-  // Use OfflineAudioContext to decode and resample cleanly
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   const tempCtx = new AudioContextClass();
   
@@ -78,13 +196,26 @@ export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<Blob> 
     audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
   } catch (decodeErr) {
     await tempCtx.close();
-    // Fallback: If decode fails directly on webm, return the original audio/webm blob slice
-    console.warn('Direct decodeAudioData failed, sending video blob as audio slice for Whisper:', decodeErr);
-    return new Blob([videoBlob], { type: 'audio/webm' });
+    console.warn('Direct decodeAudioData failed, sending video blob slice for Whisper:', decodeErr);
+    const sliceBlob = new Blob([videoBlob], { type: 'audio/webm' });
+    return {
+      audioBlob: sliceBlob,
+      totalDuration: 10,
+      vad: {
+        speechStartTime: 0,
+        speechEndTime: 10,
+        speechDuration: 10,
+        totalDuration: 10,
+        hasLeadingPause: false,
+      },
+    };
   }
   await tempCtx.close();
 
-  // Convert AudioBuffer to 16-bit Mono WAV (16kHz or 24kHz, optimal for Whisper)
+  // Run acoustic Voice Activity Detection
+  const vad = detectVoiceActivity(audioBuffer);
+
+  // Resample to 16kHz Mono WAV for Whisper
   const targetSampleRate = 16000;
   const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
   const source = offlineCtx.createBufferSource();
@@ -93,14 +224,20 @@ export async function extractAudioFromVideoBlob(videoBlob: Blob): Promise<Blob> 
   source.start(0);
 
   const renderedBuffer = await offlineCtx.startRendering();
-  return audioBufferToWavBlob(renderedBuffer);
+  const wavBlob = audioBufferToWavBlob(renderedBuffer);
+
+  return {
+    audioBlob: wavBlob,
+    totalDuration: audioBuffer.duration,
+    vad,
+  };
 }
 
 /**
- * Encode an AudioBuffer into standard RIFF PCM 16-bit Mono WAV
+ * Encode an AudioBuffer into standard RIFF PCM 16-bit WAV
  */
 function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
-  const numOfChan = 1;
+  const numOfChan = buffer.numberOfChannels || 1;
   const length = buffer.length * numOfChan * 2 + 44;
   const outBuffer = new ArrayBuffer(length);
   const view = new DataView(outBuffer);
@@ -138,9 +275,11 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   setUint32(length - pos - 4); // chunk length
 
   // Write PCM samples
-  channels.push(buffer.getChannelData(0));
+  for (let c = 0; c < numOfChan; c++) {
+    channels.push(buffer.getChannelData(c));
+  }
 
-  while (pos < length) {
+  while (pos < length && offset < buffer.length) {
     for (let i = 0; i < numOfChan; i++) {
       let sample = Math.max(-1, Math.min(1, channels[i][offset]));
       sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
@@ -154,11 +293,13 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Transcribe Audio in Portuguese using OpenAI Whisper API with precise segment timestamps
+ * Transcribe Audio in Portuguese using OpenAI Whisper API with segment timestamps
+ * and acoustic VAD cross-verification.
  */
 export async function transcribeAudioWhisper(
   audioBlob: Blob,
-  apiKey: string
+  apiKey: string,
+  vadHint?: VoiceActivityAnalysis
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
   const fileExt = audioBlob.type.includes('wav') ? 'wav' : 'webm';
@@ -191,17 +332,26 @@ export async function transcribeAudioWhisper(
 
   const data = await res.json();
   const text = (data.text || '').trim();
-  const duration = Number(data.duration) || 0;
+  const duration = Number(data.duration) || vadHint?.totalDuration || 0;
   const segments = Array.isArray(data.segments) ? data.segments : [];
 
-  let speechStartTime = 0;
-  let speechEndTime = duration;
+  let speechStartTime = vadHint?.speechStartTime ?? 0;
+  let speechEndTime = vadHint?.speechEndTime ?? duration;
 
+  // Cross-verify with Whisper segments if available
   if (segments.length > 0) {
     const validSegments = segments.filter((s: any) => s.text && s.text.trim().length > 0);
     if (validSegments.length > 0) {
-      speechStartTime = Math.max(0, validSegments[0].start ?? 0);
-      speechEndTime = Math.max(speechStartTime + 0.3, validSegments[validSegments.length - 1].end ?? duration);
+      const whisperStart = Math.max(0, validSegments[0].start ?? 0);
+      const whisperEnd = Math.max(whisperStart + 0.3, validSegments[validSegments.length - 1].end ?? duration);
+
+      // If VAD detected an initial pause before speaking, preserve it
+      if (vadHint && vadHint.speechStartTime >= 0.5) {
+        speechStartTime = vadHint.speechStartTime;
+      } else if (whisperStart > 0.3) {
+        speechStartTime = whisperStart;
+      }
+      speechEndTime = Math.max(speechStartTime + 0.5, whisperEnd);
     }
   }
 
@@ -216,26 +366,31 @@ export async function transcribeAudioWhisper(
     speechDuration,
     wordCount,
     segments,
+    vad: vadHint,
   };
 }
 
 /**
- * Translate Copy from Portuguese to Persuasive Latin American Spanish using GPT-4o-mini,
- * calibrating word count to match original speech duration.
+ * Translate Copy from Portuguese to Persuasive Latin American Spanish using GPT-4o-mini.
+ * Adapts copy length to fit naturally within the available video duration.
  */
 export async function translateCopyGPT(
   originalPortugueseText: string,
   apiKey: string,
-  speechDuration?: number
+  availableTimeWindow?: number
 ): Promise<string> {
   const wordCount = originalPortugueseText.split(/\s+/).filter(Boolean).length;
-  const timingConstraint =
-    speechDuration && speechDuration > 0
-      ? `\n\n[DIRETRIZ CRÍTICA DE SINCRONIZAÇÃO E CADÊNCIA COM O VÍDEO]:\nO locutor original falou em português por EXATAMENTE ${speechDuration.toFixed(1)} segundos (~${wordCount} palavras).\nSua tradução para o espanhol latino neutro DEVE manter uma extensão estritamente similar (cerca de ${wordCount} palavras) para que o locutor em espanhol consiga falar exatamente dentro dos mesmos ${speechDuration.toFixed(1)} segundos, mantendo a cadência e energia do criativo sem sobrar nem faltar tempo de vídeo.`
+  const timingDirective =
+    availableTimeWindow && availableTimeWindow > 0
+      ? `\n\n[DIRETRIZ DE ADAPTAÇÃO AO VÍDEO]:\nO tempo total disponível para a locução neste vídeo é de ${availableTimeWindow.toFixed(1)} segundos (~${wordCount} palavras no original). A fala em espanhol deve ser fluida, direta e persuasiva, com frases concisas que caibam confortavelmente nesse intervalo de tempo com dicção humana natural, sem correria e sem palavras desnecessárias.`
       : '';
 
   const systemPrompt =
-    `Você é um copywriter nativo em espanhol latino neutro especializado em anúncios de conversão para tráfego pago (criativos de alta performance para TikTok, Reels e YouTube Shorts). Sua tarefa é traduzir e adaptar a copy do criativo em português para espanhol latino mantendo a mesma entonação enérgica, ritmo de fala, ganchos e chamadas para ação (CTA).${timingConstraint}\n\nRetorne estritamente o texto traduzido final em espanhol, sem aspas adicionais, introduções ou comentários.`;
+    `Você é um especialista em dublagem e localização de criativos de alta conversão para tráfego pago (TikTok, Reels, Shorts), com padrão de naturalidade idêntico ao ElevenLabs.
+Sua missão:
+1. Traduzir e adaptar a fala do vídeo do português para o espanhol latino neutro com máxima fluidez e naturalidade humana.
+2. Manter a energia, tom de voz, ritmo e ganchos persuasivos originais sem soar robótico ou literal.${timingDirective}
+3. Retorne APENAS o texto traduzido final em espanhol, sem introduções, aspas extras ou comentários.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -249,7 +404,7 @@ export async function translateCopyGPT(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: originalPortugueseText },
       ],
-      temperature: 0.5,
+      temperature: 0.45,
     }),
   });
 
@@ -273,7 +428,7 @@ export async function translateCopyGPT(
 }
 
 /**
- * Generate Spanish Speech using OpenAI TTS API with speed control
+ * Generate Spanish Speech using OpenAI TTS API
  */
 export async function generateSpeechTTS(
   spanishText: string,
@@ -282,7 +437,7 @@ export async function generateSpeechTTS(
   model: DubbingConfig['model'] = 'tts-1-hd',
   speed: number = 1.0
 ): Promise<{ blob: Blob; duration: number; speed: number }> {
-  const clampedSpeed = Math.min(2.0, Math.max(0.65, Number(speed.toFixed(2))));
+  const clampedSpeed = Math.min(2.0, Math.max(0.85, Number(speed.toFixed(2))));
 
   const res = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
@@ -329,78 +484,115 @@ export async function generateSpeechTTS(
 }
 
 /**
- * Generates Spanish Speech and automatically calibrates speed so that the voiceover
- * finishes exactly within the target speech duration of the original video.
+ * Generates Spanish Speech with natural human speaking rate (1.0x standard, like ElevenLabs).
+ * CRITICAL DIRECTIVE: NEVER SLOW DOWN SPEECH BELOW 1.0x (slowing down makes voice sound artificial and sluggish).
+ * Only if the speech would overrun the video duration do we gently accelerate to fit.
  */
 export async function generateSynchronizedSpeechTTS(
   spanishText: string,
   apiKey: string,
   voice: DubbingConfig['voice'] = 'onyx',
   model: DubbingConfig['model'] = 'tts-1-hd',
-  targetSpeechDuration?: number,
+  availableTimeWindow?: number,
   forcedSpeed?: number
 ): Promise<{ blob: Blob; duration: number; appliedSpeed: number }> {
-  // If user selected a custom/manual speed, use it directly
+  // If user explicitly configured a custom/manual speed, respect it
   if (forcedSpeed && forcedSpeed !== 1.0) {
     const res = await generateSpeechTTS(spanishText, apiKey, voice, model, forcedSpeed);
     return { blob: res.blob, duration: res.duration, appliedSpeed: res.speed };
   }
 
-  // 1. Initial generation at natural 1.0x speed
-  const firstPass = await generateSpeechTTS(spanishText, apiKey, voice, model, 1.0);
+  // 1. Generate speech at natural 1.0x human speaking rate
+  const naturalPass = await generateSpeechTTS(spanishText, apiKey, voice, model, 1.0);
 
-  // If no target speech duration is provided or measurement failed, return first pass
-  if (!targetSpeechDuration || targetSpeechDuration <= 0.5 || firstPass.duration <= 0.5) {
-    return { blob: firstPass.blob, duration: firstPass.duration, appliedSpeed: 1.0 };
+  // If no time window provided or fits comfortably inside the available window, KEEP NATURAL 1.0x!
+  if (!availableTimeWindow || availableTimeWindow <= 0.5) {
+    return { blob: naturalPass.blob, duration: naturalPass.duration, appliedSpeed: 1.0 };
   }
 
-  // 2. Evaluate duration discrepancy
-  const ratio = firstPass.duration / targetSpeechDuration;
-
-  // If within 10% tolerance, the speed is already well matched
-  if (ratio >= 0.90 && ratio <= 1.10) {
-    return { blob: firstPass.blob, duration: firstPass.duration, appliedSpeed: 1.0 };
+  // If speech fits inside the video duration, NEVER slow down: 1.0x natural rate is ideal!
+  if (naturalPass.duration <= availableTimeWindow) {
+    return { blob: naturalPass.blob, duration: naturalPass.duration, appliedSpeed: 1.0 };
   }
 
-  // Calculate target speed clamped between 0.70x and 1.60x for natural human voiceover
-  const targetSpeed = Math.min(1.60, Math.max(0.70, Number(ratio.toFixed(2))));
+  // Only if speech is longer than available video time, slightly accelerate so it finishes before video ends
+  const requiredSpeed = Number((naturalPass.duration / Math.max(0.5, availableTimeWindow - 0.2)).toFixed(2));
+  const fitSpeed = Math.min(1.25, Math.max(1.02, requiredSpeed));
 
-  // 3. Re-generate with perfectly matched speed
   try {
-    const calibratedPass = await generateSpeechTTS(
+    const acceleratedPass = await generateSpeechTTS(
       spanishText,
       apiKey,
       voice,
       model,
-      targetSpeed
+      fitSpeed
     );
     return {
-      blob: calibratedPass.blob,
-      duration: calibratedPass.duration,
-      appliedSpeed: calibratedPass.speed,
+      blob: acceleratedPass.blob,
+      duration: acceleratedPass.duration,
+      appliedSpeed: acceleratedPass.speed,
     };
   } catch (calibErr) {
-    console.warn('Speed calibration fallback to first pass:', calibErr);
-    return { blob: firstPass.blob, duration: firstPass.duration, appliedSpeed: 1.0 };
+    console.warn('Speed adaptation fallback to natural 1.0x pass:', calibErr);
+    return { blob: naturalPass.blob, duration: naturalPass.duration, appliedSpeed: 1.0 };
   }
 }
 
+/**
+ * Builds a master audio track with the exact total duration of the original video.
+ * Bakes the initial silence (waiting before speaking) directly into the audio timeline,
+ * ensuring the Spanish voice enters at the exact millisecond the speaker spoke.
+ */
+export async function composeMasterDubbedAudioTrack(
+  spanishAudioBlob: Blob,
+  exactVideoDuration: number,
+  speechStartTime: number
+): Promise<{ masterBlob: Blob; duration: number }> {
+  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+  const tempCtx = new AudioCtx();
+  const arrayBuffer = await spanishAudioBlob.arrayBuffer();
+  const spanishAudioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+  await tempCtx.close().catch(() => {});
+
+  const sampleRate = 44100;
+  const totalDuration = Math.max(1, exactVideoDuration);
+  const totalSamples = Math.ceil(totalDuration * sampleRate);
+
+  const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+
+  // Place Spanish voice at speechStartTime
+  const safeStartTime = Math.max(0, Math.min(speechStartTime, Math.max(0, totalDuration - 0.2)));
+  const source = offlineCtx.createBufferSource();
+  source.buffer = spanishAudioBuffer;
+  source.connect(offlineCtx.destination);
+  source.start(safeStartTime);
+
+  const rendered = await offlineCtx.startRendering();
+  const masterWav = audioBufferToWavBlob(rendered);
+
+  return {
+    masterBlob: masterWav,
+    duration: totalDuration,
+  };
+}
+
 export interface AssembleDubbedVideoOptions {
-  speechStartTime?: number; // Detected start timestamp of speech in seconds
-  speechOffset?: number;    // Manual fine-tune offset in seconds
+  exactVideoDuration?: number; // Exact duration in seconds of original recording (MUST NOT BE SHORTENED)
+  speechStartTime?: number;    // Detected start timestamp of speech in seconds
+  speechOffset?: number;       // Manual fine-tune offset in seconds
   onProgress?: (percent: number) => void;
 }
 
 /**
  * Client-side Audio Replacement & Video Assembly:
- * 1. Completely mutes and discards the original video's microphone audio track (the Portuguese voice is 100% removed).
- * 2. Injects the Spanish TTS audio track synchronized to the exact speech start timestamp.
- * 3. Mounts the video in the active viewport (opacity 0.001) to prevent background browser frame throttling.
- * 4. Outputs a final video matching the exact duration and frame pacing of the original clip.
+ * 1. NEVER shortens or modifies video length. Full original video is 100% preserved.
+ * 2. Original microphone audio (Portuguese) is 100% discarded.
+ * 3. Spanish voice track is positioned at the exact moment the speaker starts talking,
+ *    respecting the initial pause.
  */
 export async function assembleDubbedVideo(
   videoUrlOrBlob: string | Blob,
-  newAudioBlob: Blob,
+  spanishAudioBlob: Blob,
   options: AssembleDubbedVideoOptions = {}
 ): Promise<{ blob: Blob; url: string; duration: number }> {
   return new Promise(async (resolve, reject) => {
@@ -428,32 +620,7 @@ export async function assembleDubbedVideo(
     };
 
     try {
-      // 1. Initialize Web Audio API
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      audioCtx = new AudioCtx();
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-
-      // 2. Decode Spanish TTS Audio via Web Audio API -> AudioBuffer
-      const ttsArrayBuf = await newAudioBlob.arrayBuffer();
-      const ttsAudioBuffer = await audioCtx.decodeAudioData(ttsArrayBuf.slice(0));
-
-      // 3. Create Stream Destination for MediaRecorder
-      // CRITICAL: ONLY the Spanish TTS voice is connected. The original microphone audio
-      // containing the Portuguese speech is NEVER connected, ensuring 100% replacement.
-      const audioDestNode = audioCtx.createMediaStreamDestination();
-
-      const ttsSourceNode = audioCtx.createBufferSource();
-      ttsSourceNode.buffer = ttsAudioBuffer;
-      const ttsGain = audioCtx.createGain();
-      ttsGain.gain.setValueAtTime(1.15, audioCtx.currentTime);
-      ttsSourceNode.connect(ttsGain);
-      ttsGain.connect(audioDestNode);
-
-      // 4. Setup Video Element in DOM inside active viewport
-      // CRITICAL FIX: Keeping it in viewport (top: 0, left: 0, opacity: 0.001) prevents
-      // Chromium and Safari from throttling video decoding to 1-2 fps as an "offscreen" element!
+      // 1. Setup Video Element in DOM inside active viewport
       videoSrc = typeof videoUrlOrBlob === 'string' ? videoUrlOrBlob : URL.createObjectURL(videoUrlOrBlob);
       videoEl = document.createElement('video');
       videoEl.src = videoSrc;
@@ -493,17 +660,53 @@ export async function assembleDubbedVideo(
           res();
         };
         videoEl!.addEventListener('seeked', onSeek);
-        setTimeout(res, 250);
+        setTimeout(res, 200);
       });
 
-      const videoDuration = Math.max(
+      // Determine TRUE video duration (never truncate to 10s!)
+      const trueVideoDuration = Math.max(
         1,
-        videoEl.duration && isFinite(videoEl.duration) ? videoEl.duration : 10
+        options.exactVideoDuration && isFinite(options.exactVideoDuration) && options.exactVideoDuration > 0
+          ? options.exactVideoDuration
+          : videoEl.duration && isFinite(videoEl.duration)
+          ? videoEl.duration
+          : 15
       );
+
+      const effectiveSpeechStart = Math.max(
+        0,
+        (options.speechStartTime ?? 0) + (options.speechOffset ?? 0)
+      );
+
+      // 2. Compose master audio track with the exact duration of the video and the initial pause baked in
+      const { masterBlob } = await composeMasterDubbedAudioTrack(
+        spanishAudioBlob,
+        trueVideoDuration,
+        effectiveSpeechStart
+      );
+
+      // 3. Initialize Web Audio API to feed MediaRecorder
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
+      const masterArrayBuf = await masterBlob.arrayBuffer();
+      const masterAudioBuffer = await audioCtx.decodeAudioData(masterArrayBuf.slice(0));
+
+      const audioDestNode = audioCtx.createMediaStreamDestination();
+      const masterSourceNode = audioCtx.createBufferSource();
+      masterSourceNode.buffer = masterAudioBuffer;
+      const ttsGain = audioCtx.createGain();
+      ttsGain.gain.setValueAtTime(1.15, audioCtx.currentTime);
+      masterSourceNode.connect(ttsGain);
+      ttsGain.connect(audioDestNode);
+
       const width = videoEl.videoWidth || 1280;
       const height = videoEl.videoHeight || 720;
 
-      // 5. Setup Canvas and MediaRecorder Stream
+      // 4. Setup Canvas and MediaRecorder Stream
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
@@ -524,7 +727,6 @@ export async function assembleDubbedVideo(
 
       const combinedStream = new MediaStream([videoTrack, audioTrack]);
 
-      // Detect supported mimeType
       const isIOS =
         typeof navigator !== 'undefined' &&
         (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
@@ -561,7 +763,7 @@ export async function assembleDubbedVideo(
         resolve({
           blob: finalBlob,
           url: finalUrl,
-          duration: Math.round(videoDuration),
+          duration: Math.round(trueVideoDuration),
         });
       };
 
@@ -570,41 +772,31 @@ export async function assembleDubbedVideo(
         reject(err);
       };
 
-      // 6. Start recorder and synchronized playback
+      // 5. Start recorder, play video and master audio in absolute sync
       recorder.start(100);
+      masterSourceNode.start(0);
 
-      // Play video element
       await videoEl.play().catch((playErr) => {
         console.warn('Video element play() was restricted, continuing frame capture:', playErr);
       });
 
-      // Align Spanish audio start with exact speech start timestamp
-      const scheduledStartOffset = Math.max(
-        0,
-        (options.speechStartTime || 0) + (options.speechOffset || 0)
-      );
-      const audioStartTime = audioCtx.currentTime + scheduledStartOffset;
-      ttsSourceNode.start(audioStartTime);
-
-      // 7. Video Frame Render Loop driven by videoEl.currentTime
+      // 6. Video Frame Render Loop: preserves 100% of video frames without cutting
       const renderLoop = () => {
         if (completed) return;
 
-        // Draw current decoded video frame
         if (videoEl && videoEl.readyState >= 2) {
           ctx.drawImage(videoEl, 0, 0, width, height);
         }
 
         const curTime = videoEl ? videoEl.currentTime : 0;
 
-        // Progress notification
-        if (options.onProgress && videoDuration > 0) {
-          const pct = Math.min(99, Math.round((curTime / videoDuration) * 100));
+        if (options.onProgress && trueVideoDuration > 0) {
+          const pct = Math.min(99, Math.round((curTime / trueVideoDuration) * 100));
           options.onProgress(pct);
         }
 
-        // Completion check: stop exactly when video reaches its end
-        if (videoEl && (videoEl.ended || curTime >= videoDuration - 0.08)) {
+        // Complete ONLY when the video finishes playing its true duration
+        if (videoEl && (videoEl.ended || curTime >= trueVideoDuration - 0.03)) {
           completed = true;
           if (recorder.state === 'recording') {
             recorder.stop();
@@ -617,13 +809,13 @@ export async function assembleDubbedVideo(
 
       animId = requestAnimationFrame(renderLoop);
 
-      // Safety timeout in case frame timing stalls
+      // Safety timeout scaled generously to the true video duration
       setTimeout(() => {
         if (!completed && recorder.state === 'recording') {
           completed = true;
           recorder.stop();
         }
-      }, (videoDuration + 4) * 1000);
+      }, (trueVideoDuration + 8) * 1000);
     } catch (err) {
       cleanup();
       reject(err);
