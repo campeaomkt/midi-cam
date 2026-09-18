@@ -258,72 +258,154 @@ export async function generateSpeechTTS(
 /**
  * Client-side Audio Replacement & Video Assembly:
  * Takes the original video and replaces its audio track with the new Spanish TTS audio track
- * using HTMLVideoElement + Web Audio API + MediaStreamDestination + MediaRecorder.
- * Works 100% in browser without requiring heavy wasm binaries.
+ * and optionally mixes the original keyboard/piano timbre into the background.
+ * Uses Web Audio API (AudioBufferSourceNode) to guarantee 100% reliable audio output
+ * with zero browser autoplay blocks or silence bugs.
  */
 export async function assembleDubbedVideo(
   videoUrlOrBlob: string | Blob,
   newAudioBlob: Blob,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  backgroundPianoVolume: number = 0.35
 ): Promise<{ blob: Blob; url: string; duration: number }> {
   return new Promise(async (resolve, reject) => {
-    try {
-      const videoSrc = typeof videoUrlOrBlob === 'string' ? videoUrlOrBlob : URL.createObjectURL(videoUrlOrBlob);
-      const audioSrc = URL.createObjectURL(newAudioBlob);
+    let videoEl: HTMLVideoElement | null = null;
+    let audioCtx: AudioContext | null = null;
+    let animId: number | null = null;
+    let vfcId: number | null = null;
+    let completed = false;
+    let videoSrc = '';
 
-      const videoEl = document.createElement('video');
+    const cleanup = () => {
+      completed = true;
+      if (animId) cancelAnimationFrame(animId);
+      if (vfcId && videoEl && (videoEl as any).cancelVideoFrameCallback) {
+        (videoEl as any).cancelVideoFrameCallback(vfcId);
+      }
+      if (videoEl) {
+        videoEl.pause();
+        if (videoEl.parentElement) {
+          videoEl.parentElement.removeChild(videoEl);
+        }
+      }
+      if (audioCtx && audioCtx.state !== 'closed') {
+        audioCtx.close().catch(() => {});
+      }
+      if (videoSrc && typeof videoUrlOrBlob !== 'string') {
+        URL.revokeObjectURL(videoSrc);
+      }
+    };
+
+    try {
+      // 1. Initialize Web Audio API
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
+      // 2. Decode Spanish TTS Audio (MP3/WAV Blob) via Web Audio API -> AudioBuffer
+      const ttsArrayBuf = await newAudioBlob.arrayBuffer();
+      const ttsAudioBuffer = await audioCtx.decodeAudioData(ttsArrayBuf.slice(0));
+
+      // 3. Try to decode the original video's audio (piano timbre / background music)
+      let origAudioBuffer: AudioBuffer | null = null;
+      try {
+        let videoBlob: Blob;
+        if (videoUrlOrBlob instanceof Blob) {
+          videoBlob = videoUrlOrBlob;
+        } else {
+          const resp = await fetch(videoUrlOrBlob);
+          videoBlob = await resp.blob();
+        }
+        const vidArrayBuf = await videoBlob.arrayBuffer();
+        origAudioBuffer = await audioCtx.decodeAudioData(vidArrayBuf.slice(0));
+      } catch (err) {
+        console.warn('Original video audio could not be decoded for background mix:', err);
+      }
+
+      // 4. Create Stream Destination for MediaRecorder
+      const audioDestNode = audioCtx.createMediaStreamDestination();
+
+      // 4a. Connect Spanish TTS Voice (Foreground, loud and crystal clear)
+      const ttsSourceNode = audioCtx.createBufferSource();
+      ttsSourceNode.buffer = ttsAudioBuffer;
+      const ttsGain = audioCtx.createGain();
+      ttsGain.gain.setValueAtTime(1.15, audioCtx.currentTime);
+      ttsSourceNode.connect(ttsGain);
+      ttsGain.connect(audioDestNode);
+
+      // 4b. Connect Original Piano Timbre (Background mix at requested volume)
+      let origSourceNode: AudioBufferSourceNode | null = null;
+      if (origAudioBuffer && backgroundPianoVolume > 0) {
+        origSourceNode = audioCtx.createBufferSource();
+        origSourceNode.buffer = origAudioBuffer;
+        const origGain = audioCtx.createGain();
+        origGain.gain.setValueAtTime(backgroundPianoVolume, audioCtx.currentTime);
+        origSourceNode.connect(origGain);
+        origGain.connect(audioDestNode);
+      }
+
+      // 5. Setup Video Element in DOM (off-screen so WebKit/mobile browsers decode frames actively)
+      videoSrc = typeof videoUrlOrBlob === 'string' ? videoUrlOrBlob : URL.createObjectURL(videoUrlOrBlob);
+      videoEl = document.createElement('video');
       videoEl.src = videoSrc;
-      videoEl.muted = true; // Mute video original audio
+      videoEl.muted = true;
       videoEl.crossOrigin = 'anonymous';
       videoEl.playsInline = true;
       (videoEl as any).webkitPlaysInline = true;
+      videoEl.setAttribute('playsinline', 'true');
+      videoEl.setAttribute('webkit-playsinline', 'true');
 
-      const audioEl = document.createElement('audio');
-      audioEl.src = audioSrc;
+      // Keep in DOM offscreen
+      videoEl.style.position = 'fixed';
+      videoEl.style.top = '-9999px';
+      videoEl.style.left = '-9999px';
+      videoEl.style.width = '2px';
+      videoEl.style.height = '2px';
+      videoEl.style.opacity = '0.001';
+      videoEl.style.pointerEvents = 'none';
+      document.body.appendChild(videoEl);
 
-      // Wait for metadata
-      await Promise.all([
-        new Promise((res) => {
-          videoEl.onloadedmetadata = res;
-          videoEl.onerror = () => res(null);
-        }),
-        new Promise((res) => {
-          audioEl.onloadedmetadata = res;
-          audioEl.onerror = () => res(null);
-        }),
-      ]);
+      // Wait for video metadata
+      await new Promise<void>((res) => {
+        if (videoEl!.readyState >= 1) {
+          res();
+        } else {
+          videoEl!.onloadedmetadata = () => res();
+          videoEl!.onerror = () => res();
+        }
+      });
 
-      const videoDuration = videoEl.duration || 10;
-      const audioDuration = audioEl.duration || videoDuration;
-      // We render for the duration of the video or audio (whichever is needed)
-      const targetDuration = Math.max(videoDuration, audioDuration);
+      const videoDuration =
+        videoEl.duration && isFinite(videoEl.duration)
+          ? videoEl.duration
+          : origAudioBuffer
+          ? origAudioBuffer.duration
+          : 10;
+      const targetDuration = Math.max(videoDuration, ttsAudioBuffer.duration);
 
       const width = videoEl.videoWidth || 1280;
       const height = videoEl.videoHeight || 720;
 
+      // 6. Setup High-Fidelity Canvas
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) {
         throw new Error('Não foi possível obter contexto 2D do canvas');
       }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
 
-      // Audio setup via Web Audio API
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioCtx();
-      const audioSourceNode = audioCtx.createMediaElementSource(audioEl);
-      const audioDestNode = audioCtx.createMediaStreamDestination();
-      audioSourceNode.connect(audioDestNode);
-      // Also connect to null or keep destination
-
-      // Capture Canvas Stream (30 FPS)
+      // 7. Capture MediaStream
       const canvasStream = canvas.captureStream(30);
       const videoTrack = canvasStream.getVideoTracks()[0];
       const audioTrack = audioDestNode.stream.getAudioTracks()[0];
 
       if (!videoTrack || !audioTrack) {
-        throw new Error('Falha ao obter tracks de mídia para a montagem');
+        throw new Error('Falha ao obter tracks de mídia para a montagem do vídeo');
       }
 
       const combinedStream = new MediaStream([videoTrack, audioTrack]);
@@ -335,7 +417,7 @@ export async function assembleDubbedVideo(
           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
       const mimeCandidates = isIOS
-        ? ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm']
+        ? ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm']
         : ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 
       let chosenMime = '';
@@ -348,27 +430,13 @@ export async function assembleDubbedVideo(
 
       const recorder = new MediaRecorder(combinedStream, {
         ...(chosenMime ? { mimeType: chosenMime } : {}),
-        videoBitsPerSecond: 3500000,
+        videoBitsPerSecond: 4000000,
       });
 
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           chunks.push(e.data);
-        }
-      };
-
-      let animId: number | null = null;
-      let completed = false;
-
-      const cleanup = () => {
-        if (animId) cancelAnimationFrame(animId);
-        videoEl.pause();
-        audioEl.pause();
-        audioCtx.close().catch(() => {});
-        URL.revokeObjectURL(audioSrc);
-        if (typeof videoUrlOrBlob !== 'string') {
-          URL.revokeObjectURL(videoSrc);
         }
       };
 
@@ -388,22 +456,34 @@ export async function assembleDubbedVideo(
         reject(err);
       };
 
-      // Animation render loop
-      const drawFrame = () => {
+      // 8. Start recording and audio playback
+      recorder.start(100);
+      ttsSourceNode.start(0);
+      if (origSourceNode) {
+        origSourceNode.start(0);
+      }
+
+      const startTime = performance.now();
+
+      // Video Frame Render Loop
+      const renderLoop = () => {
         if (completed) return;
 
-        if (videoEl.readyState >= 2) {
+        const elapsedSec = (performance.now() - startTime) / 1000;
+
+        // Draw current video frame
+        if (videoEl && videoEl.readyState >= 2) {
           ctx.drawImage(videoEl, 0, 0, width, height);
         }
 
-        const currentTime = Math.max(videoEl.currentTime, audioEl.currentTime);
+        // Progress notification
         if (onProgress && targetDuration > 0) {
-          const pct = Math.min(99, Math.round((currentTime / targetDuration) * 100));
+          const pct = Math.min(99, Math.round((elapsedSec / targetDuration) * 100));
           onProgress(pct);
         }
 
-        // Check if finished
-        if (currentTime >= targetDuration - 0.1 || (videoEl.ended && audioEl.ended)) {
+        // Completion check
+        if (elapsedSec >= targetDuration - 0.05) {
           completed = true;
           if (recorder.state === 'recording') {
             recorder.stop();
@@ -411,19 +491,17 @@ export async function assembleDubbedVideo(
           return;
         }
 
-        animId = requestAnimationFrame(drawFrame);
+        animId = requestAnimationFrame(renderLoop);
       };
 
-      // Start everything
-      recorder.start(100);
-      await audioCtx.resume();
-      await Promise.all([
-        videoEl.play().catch(() => {}),
-        audioEl.play().catch(() => {}),
-      ]);
-      animId = requestAnimationFrame(drawFrame);
+      // Play video
+      await videoEl.play().catch((playErr) => {
+        console.warn('Video element play() was restricted, continuing frame capture:', playErr);
+      });
 
-      // Fallback timeout in case playback stalls
+      animId = requestAnimationFrame(renderLoop);
+
+      // Safety timeout in case frame timing stalls
       setTimeout(() => {
         if (!completed && recorder.state === 'recording') {
           completed = true;
@@ -431,6 +509,7 @@ export async function assembleDubbedVideo(
         }
       }, (targetDuration + 3) * 1000);
     } catch (err) {
+      cleanup();
       reject(err);
     }
   });

@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Eye,
   Edit3,
+  Music,
 } from 'lucide-react';
 import {
   DubbingConfig,
@@ -75,6 +76,7 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
   const [isRegeneratingTTS, setIsRegeneratingTTS] = useState<boolean>(false);
   const [isReassemblingVideo, setIsReassemblingVideo] = useState<boolean>(false);
   const [assemblyProgress, setAssemblyProgress] = useState<number>(0);
+  const [backgroundPianoVolume, setBackgroundPianoVolume] = useState<number>(0.35);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dubbed' | 'original' | 'compare'>('dubbed');
 
@@ -185,9 +187,10 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       updateStep(5, 'in-progress');
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
-        recording.url || recording.blob,
+        recording.blob || recording.url,
         speechBlob,
-        (pct) => setAssemblyProgress(pct)
+        (pct) => setAssemblyProgress(pct),
+        backgroundPianoVolume
       );
       setDubbedVideoResult(assembled);
       updateStep(5, 'completed');
@@ -241,9 +244,10 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
       updateStep(5, 'in-progress', 'Remontando vídeo final com a nova locução...');
       setAssemblyProgress(0);
       const assembled = await assembleDubbedVideo(
-        recording.url || recording.blob,
+        recording.blob || recording.url,
         speechBlob,
-        (pct) => setAssemblyProgress(pct)
+        (pct) => setAssemblyProgress(pct),
+        backgroundPianoVolume
       );
       setDubbedVideoResult(assembled);
       updateStep(5, 'completed', 'Vídeo dublado atualizado!');
@@ -342,9 +346,9 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
               <span className="text-[10px] text-zinc-400">Salvo com segurança no seu navegador</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               {/* API Key */}
-              <div className="md:col-span-3 flex flex-col gap-1.5">
+              <div className="sm:col-span-2 md:col-span-4 flex flex-col gap-1.5">
                 <label className="text-zinc-300 font-semibold flex items-center justify-between">
                   <span>OpenAI API Key (sk-...)</span>
                   <button
@@ -385,12 +389,12 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
                   onChange={(e) => handleVoiceChange(e.target.value as any)}
                   className="bg-black/70 border border-white/20 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-400 cursor-pointer"
                 >
-                  <option value="onyx">Onyx (Masculina, Profunda e Firme - Padrão)</option>
-                  <option value="echo">Echo (Masculina, Dinâmica e Clara)</option>
+                  <option value="onyx">Onyx (Masculina, Firme)</option>
+                  <option value="echo">Echo (Masculina, Dinâmica)</option>
                   <option value="alloy">Alloy (Neutra, Equilibrada)</option>
-                  <option value="fable">Fable (Expressiva com Entonação)</option>
-                  <option value="shimmer">Shimmer (Feminina, Clara e Brilhante)</option>
-                  <option value="nova">Nova (Feminina, Enérgica e Amigável)</option>
+                  <option value="fable">Fable (Expressiva)</option>
+                  <option value="shimmer">Shimmer (Feminina, Clara)</option>
+                  <option value="nova">Nova (Feminina, Enérgica)</option>
                 </select>
               </div>
 
@@ -398,14 +402,14 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
               <div className="flex flex-col gap-1.5">
                 <label className="text-zinc-300 font-semibold flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Modelo de Voz (TTS)</span>
+                  <span>Modelo (TTS)</span>
                 </label>
                 <select
                   value={config.model}
                   onChange={(e) => handleModelChange(e.target.value as any)}
                   className="bg-black/70 border border-white/20 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-400 cursor-pointer"
                 >
-                  <option value="tts-1-hd">tts-1-hd (Alta Fidelidade / Recomendado)</option>
+                  <option value="tts-1-hd">tts-1-hd (Alta Fidelidade)</option>
                   <option value="tts-1">tts-1 (Rápido e Leve)</option>
                 </select>
               </div>
@@ -414,11 +418,36 @@ export const AiDubbingModal: React.FC<AiDubbingModalProps> = ({
               <div className="flex flex-col gap-1.5">
                 <label className="text-zinc-300 font-semibold flex items-center gap-1">
                   <Languages className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Tradução de Copy</span>
+                  <span>Tradução LATAM</span>
                 </label>
                 <div className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-zinc-400 text-xs flex items-center justify-between">
                   <span className="font-mono">gpt-4o-mini</span>
-                  <span className="text-[10px] text-emerald-400 font-semibold">Persuasivo LATAM</span>
+                  <span className="text-[10px] text-emerald-400 font-semibold">Persuasivo</span>
+                </div>
+              </div>
+
+              {/* Background Music / Piano Volume */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-zinc-300 font-semibold flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Music className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Teclado ao Fundo</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-cyan-300 font-bold">
+                    {Math.round(backgroundPianoVolume * 100)}%
+                  </span>
+                </label>
+                <div className="h-[38px] flex items-center bg-black/70 border border-white/20 rounded-lg px-2.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={backgroundPianoVolume}
+                    onChange={(e) => setBackgroundPianoVolume(parseFloat(e.target.value))}
+                    className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-700 rounded-lg"
+                    title={`Volume do som do teclado original: ${Math.round(backgroundPianoVolume * 100)}%`}
+                  />
                 </div>
               </div>
             </div>

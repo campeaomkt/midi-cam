@@ -420,6 +420,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 <g
                   key={key.midi}
                   id={`piano-key-white-${key.midi}`}
+                  data-white-index={i}
+                  data-midi={key.midi}
                   className="cursor-pointer"
                   onMouseDown={() => handleTouchStart(key.midi)}
                   onMouseUp={() => handleTouchEnd(key.midi)}
@@ -520,6 +522,8 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                 <g
                   key={key.midi}
                   id={`piano-key-black-${key.midi}`}
+                  data-seam-index={key.seamIndex}
+                  data-midi={key.midi}
                   className="cursor-pointer"
                   onMouseDown={() => handleTouchStart(key.midi)}
                   onMouseUp={() => handleTouchEnd(key.midi)}
