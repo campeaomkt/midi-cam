@@ -37,13 +37,13 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
   const H = 280;
   const cx = W / 2; // 600
 
-  const frontLeft = 45;
-  const frontRight = 1155;
-  const frontW = frontRight - frontLeft; // 1110
+  const frontLeft = 18;
+  const frontRight = 1182;
+  const frontW = frontRight - frontLeft; // 1164
 
-  const yTop = 22; // Top/back edge of white keys
-  const yFront = 214; // Line where white key top meets vertical front face
-  const yBottom = 270; // Bottom edge of vertical front face
+  const yTop = 20; // Top/back edge of white keys
+  const yFront = 216; // Line where white key top meets vertical front face
+  const yBottom = 268; // Bottom edge of vertical front face
 
   // Perspective ratio: how much the back narrows compared to the front
   const backRatio = 0.932;
@@ -87,7 +87,7 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
 
   return (
     <div
-      className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden select-none touch-none"
+      className="relative w-full h-full flex items-center justify-center bg-transparent overflow-visible select-none touch-none"
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUpOrLeave}
       onPointerLeave={handlePointerUpOrLeave}
@@ -96,7 +96,7 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
     >
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full h-full select-none touch-none"
+        className="w-full h-full select-none touch-none filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.55)]"
         preserveAspectRatio="none"
       >
         <defs>
@@ -130,6 +130,9 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
             const topPoints = `${xb0},${yTop + ySink} ${xb1},${yTop + ySink} ${xf1},${yFront + ySink} ${xf0},${yFront + ySink}`;
             const frontPoints = `${xf0},${yFront + ySink} ${xf1},${yFront + ySink} ${xf1},${yBottom} ${xf0},${yBottom}`;
 
+            const isFirst = i === 0;
+            const isLast = i === totalWhiteKeys - 1;
+
             return (
               <g
                 key={key.midi}
@@ -138,6 +141,26 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
                 className="cursor-pointer"
                 onPointerDown={(e) => handlePointerDown(key.midi, e)}
               >
+                {/* Left Outer Side Face for the first white key */}
+                {isFirst && (
+                  <polygon
+                    points={`${xb0},${yTop + ySink} ${xf0},${yFront + ySink} ${xf0},${yBottom} ${xb0},${yTop + ySink + (yBottom - yFront)}`}
+                    fill={isActive ? darkerColor : '#7b7e87'}
+                    stroke="#1c1c1f"
+                    strokeWidth="1"
+                  />
+                )}
+
+                {/* Right Outer Side Face for the last white key */}
+                {isLast && (
+                  <polygon
+                    points={`${xb1},${yTop + ySink} ${xf1},${yFront + ySink} ${xf1},${yBottom} ${xb1},${yTop + ySink + (yBottom - yFront)}`}
+                    fill={isActive ? darkerColor : '#7b7e87'}
+                    stroke="#1c1c1f"
+                    strokeWidth="1"
+                  />
+                )}
+
                 {/* White Key Top Face (slanted perspective) */}
                 <polygon
                   points={topPoints}

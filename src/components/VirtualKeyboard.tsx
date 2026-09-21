@@ -402,9 +402,9 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       {/* 3D Isometric Piano Bed / Base Housing */}
       <div
         ref={scrollContainerRef}
-        className={`relative w-full ${heightClass} overflow-hidden touch-none select-none ${
+        className={`relative w-full ${heightClass} overflow-visible touch-none select-none ${
           isModel3D
-            ? 'bg-black shadow-[0_20px_40px_rgba(0,0,0,0.95)]'
+            ? 'bg-transparent'
             : 'bg-white border border-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.45)]'
         }`}
       >
