@@ -33,7 +33,7 @@ export const SoundFontManagerModal: React.FC<SoundFontManagerModalProps> = ({
   onSoundFontChanged,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [activeTab, setActiveTab] = useState<'builtin' | 'custom_sf2'>('builtin');
+  const [activeTab, setActiveTab] = useState<'builtin' | 'custom_sf2'>('custom_sf2');
   const [isLoadingSF2, setIsLoadingSF2] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -46,6 +46,17 @@ export const SoundFontManagerModal: React.FC<SoundFontManagerModalProps> = ({
     const unsub = timbreEngine.subscribe(() => setTick((t) => t + 1));
     return unsub;
   }, []);
+
+  // Set appropriate tab when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      if (sf2Engine.getIsLoaded() || timbreEngine.getMode() === 'custom_sf2') {
+        setActiveTab('custom_sf2');
+      }
+    }
+  }, [isOpen]);
 
   // Monitor audio context state
   useEffect(() => {
@@ -157,8 +168,9 @@ export const SoundFontManagerModal: React.FC<SoundFontManagerModalProps> = ({
     }
   };
 
-  const handleSelectPreset = (index: number) => {
+  const handleSelectPreset = async (index: number) => {
     sf2Engine.selectPreset(index);
+    await timbreEngine.setTimbre('custom_sf2');
     onSoundFontChanged();
 
     // Play a test note

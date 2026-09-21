@@ -28,7 +28,6 @@ import { RecordedVideosModal } from './components/RecordedVideosModal';
 import { SoundFontManagerModal } from './components/SoundFontManagerModal';
 import { WifiMidiSyncModal } from './components/WifiMidiSyncModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { AiDubbingModal } from './components/AiDubbingModal';
 import { sf2Engine } from './utils/sf2Engine';
 import { loadSoundFontFromStorage } from './utils/sf2Storage';
 import { timbreEngine } from './utils/timbreEngine';
@@ -43,8 +42,6 @@ export default function App() {
     zoom: 1,
     gridEnabled: false,
     micEnabled: true,
-    recordMicWithTimbre: true, // Gravar o microfone do celular junto com o som do timbre
-    micVolume: 1.0, // Volume do microfone (100%)
     flashEnabled: false,
     recordingMode: 'overlay', // Default to Overlay so keyboard, animated keys and chords are burned into the recorded video
   });
@@ -105,8 +102,6 @@ export default function App() {
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isSoundFontOpen, setIsSoundFontOpen] = useState(false);
   const [isWifiSyncOpen, setIsWifiSyncOpen] = useState(false);
-  const [isAiDubbingOpen, setIsAiDubbingOpen] = useState(false);
-  const [dubbingTargetRecording, setDubbingTargetRecording] = useState<VideoRecording | null>(null);
   const [wifiSyncStatus, setWifiSyncStatus] = useState<WifiSyncStatus>(() =>
     wifiMidiBridge.getStatus()
   );
@@ -322,21 +317,12 @@ export default function App() {
     }));
   };
 
-  // Sync microphone volume when changed in settings
-  useEffect(() => {
-    if (cameraSettings.micVolume !== undefined) {
-      audioSynth.setMicVolume(cameraSettings.micVolume);
-    }
-  }, [cameraSettings.micVolume]);
-
-  // Video Recording Lifecycle with Dual Audio Mixing (Phone Mic + Timbre Sound)
-  const handleToggleRecording = async () => {
+  // Video Recording Lifecycle
+  const handleToggleRecording = () => {
     if (isRecording) {
       videoRecorder.stopRecording();
       setIsRecording(false);
       setRecordingSeconds(0);
-      // Clean up microphone to turn off phone privacy dot
-      audioSynth.disableMicrophone();
     } else {
       if (!videoRef.current) return;
 
@@ -346,19 +332,10 @@ export default function App() {
       // Ensure audio context is running for perfect synchronization
       const audioCtx = audioSynth.getAudioContext();
       if (audioCtx && audioCtx.state === 'suspended') {
-        await audioCtx.resume();
+        audioCtx.resume();
       }
 
-      // Activate Phone Microphone alongside Timbre if enabled
-      const shouldRecordMic =
-        cameraSettings.micEnabled && cameraSettings.recordMicWithTimbre !== false;
-      if (shouldRecordMic) {
-        await audioSynth.enableMicrophone(cameraSettings.micVolume ?? 1.0);
-      } else {
-        audioSynth.disableMicrophone();
-      }
-
-      // Audio tracks from Synth & Mic (both digitally mixed into streamDestination)
+      // Audio tracks from Synth & Mic
       const audioTracks: MediaStreamTrack[] = [];
       const synthDest = audioSynth.getAudioStreamDestination();
       if (synthDest && synthDest.stream.getAudioTracks().length > 0) {
@@ -487,14 +464,6 @@ export default function App() {
             wifiSyncStatus={wifiSyncStatus}
             onOpenWifiSync={() => setIsWifiSyncOpen(true)}
             onToggleSustain={handleToggleSustain}
-            onOpenAiDubbing={() => {
-              if (recordings.length > 0) {
-                setDubbingTargetRecording(recordings[0]);
-              } else {
-                setDubbingTargetRecording(null);
-              }
-              setIsAiDubbingOpen(true);
-            }}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
             onOpenSettings={() => setIsSettingsOpen(true)}
@@ -560,15 +529,6 @@ export default function App() {
           setIsWifiSyncOpen(true);
         }}
         onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
-        onOpenAiDubbing={() => {
-          setIsSettingsOpen(false);
-          if (recordings.length > 0) {
-            setDubbingTargetRecording(recordings[0]);
-          } else {
-            setDubbingTargetRecording(null);
-          }
-          setIsAiDubbingOpen(true);
-        }}
         onRequestMidi={handleRequestMidi}
         onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
         onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
@@ -619,24 +579,6 @@ export default function App() {
         recordings={recordings}
         onDeleteRecording={handleDeleteRecording}
         onImportMedia={handleImportMedia}
-        onOpenDubbing={(rec) => {
-          setDubbingTargetRecording(rec);
-          setIsAiDubbingOpen(true);
-        }}
-      />
-
-      {/* AI Dubbing & Spanish Translation Modal (OpenAI Client-Side) */}
-      <AiDubbingModal
-        isOpen={isAiDubbingOpen}
-        onClose={() => {
-          setIsAiDubbingOpen(false);
-          setDubbingTargetRecording(null);
-        }}
-        recording={dubbingTargetRecording}
-        onDubbingComplete={async (newDubbedRec) => {
-          setRecordings((prev) => [newDubbedRec, ...prev]);
-          await saveRecordingToStorage(newDubbedRec);
-        }}
       />
     </div>
   );

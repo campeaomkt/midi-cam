@@ -15,7 +15,6 @@ import {
   AlertCircle,
   Music,
   Wifi,
-  Languages,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -28,7 +27,6 @@ interface TopHudBarProps {
   wifiSyncStatus?: WifiSyncStatus;
   onOpenWifiSync?: () => void;
   onToggleSustain?: () => void;
-  onOpenAiDubbing?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
   onUpdateKeyboard: (settings: Partial<KeyboardSettings>) => void;
   onOpenSettings: () => void;
@@ -48,7 +46,6 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   wifiSyncStatus,
   onOpenWifiSync,
   onToggleSustain,
-  onOpenAiDubbing,
   onUpdateCamera,
   onUpdateKeyboard,
   onOpenSettings,
@@ -103,30 +100,17 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             {cameraSettings.flashEnabled ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
           </button>
 
-          {/* Microphone + Timbre Dual Audio Toggle */}
+          {/* Microphone */}
           <button
             type="button"
             id="btn-toggle-mic"
             onClick={() => onUpdateCamera({ micEnabled: !cameraSettings.micEnabled })}
-            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-full transition active:scale-90 cursor-pointer flex items-center gap-1.5 ${
-              cameraSettings.micEnabled
-                ? 'text-emerald-300 bg-emerald-500/25 border border-emerald-400/40 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
-                : 'text-zinc-400 bg-zinc-800/60 border border-white/10 hover:text-white'
+            className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
+              cameraSettings.micEnabled ? 'text-white' : 'text-rose-400 bg-rose-400/20'
             }`}
-            title={
-              cameraSettings.micEnabled
-                ? 'Gravando: Microfone do Telefone + Som do Timbre juntos (Clique para desativar mic)'
-                : 'Gravando: Apenas Som do Timbre (Microfone desligado - Clique para ativar)'
-            }
+            title="Microfone"
           >
-            {cameraSettings.micEnabled ? (
-              <Mic className="w-4 h-4 text-emerald-400 animate-pulse" />
-            ) : (
-              <MicOff className="w-4 h-4 text-zinc-400" />
-            )}
-            <span className="text-[10px] font-bold tracking-tight">
-              {cameraSettings.micEnabled ? 'Mic+Timbre' : 'Só Timbre'}
-            </span>
+            {cameraSettings.micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
           </button>
 
           {/* Grid lines */}
@@ -141,19 +125,6 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           >
             <Grid3X3 className="w-5 h-5" />
           </button>
-
-          {/* AI Dubbing / Translation Icon */}
-          {onOpenAiDubbing && (
-            <button
-              type="button"
-              id="btn-open-ai-dubbing"
-              onClick={onOpenAiDubbing}
-              className="p-1.5 md:p-2 rounded-full text-cyan-400 bg-cyan-400/15 hover:bg-cyan-400/25 border border-cyan-400/30 transition active:scale-90 cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.2)]"
-              title="Dublagem & Tradução IA para Espanhol (OpenAI)"
-            >
-              <Languages className="w-5 h-5" />
-            </button>
-          )}
 
           {/* Settings Modal */}
           <button

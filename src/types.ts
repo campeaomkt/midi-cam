@@ -94,8 +94,6 @@ export interface CameraSettings {
   zoom: number;
   gridEnabled: boolean;
   micEnabled: boolean;
-  recordMicWithTimbre?: boolean; // Grava o microfone do celular junto com o som do timbre
-  micVolume?: number; // 0.0 a 1.5, padrão 1.0 (100%)
   flashEnabled: boolean;
   recordingMode?: 'overlay' | 'direct'; // 'overlay' embeds keyboard & chord into video, 'direct' records raw camera stream for 0% CPU lag
 }

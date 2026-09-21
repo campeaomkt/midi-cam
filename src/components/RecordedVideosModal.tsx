@@ -21,7 +21,6 @@ interface RecordedVideosModalProps {
   recordings: VideoRecording[];
   onDeleteRecording: (id: string) => void;
   onImportMedia?: (file: File) => void;
-  onOpenDubbing?: (recording: VideoRecording) => void;
 }
 
 export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
@@ -30,7 +29,6 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
   recordings,
   onDeleteRecording,
   onImportMedia,
-  onOpenDubbing,
 }) => {
   const [selectedVideo, setSelectedVideo] = useState<VideoRecording | null>(
     recordings.length > 0 ? recordings[0] : null
@@ -206,21 +204,7 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
               </div>
 
               {/* Action buttons */}
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                {/* Process Creative to Spanish Button */}
-                {onOpenDubbing && (
-                  <button
-                    type="button"
-                    id="btn-dub-creative-spanish"
-                    onClick={() => onOpenDubbing(selectedVideo)}
-                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-black font-extrabold flex items-center gap-1.5 transition shadow-lg shadow-cyan-500/20 active:scale-95 cursor-pointer text-xs"
-                    title="Processar Criativo para Espanhol com IA (Whisper + GPT + TTS)"
-                  >
-                    <Sparkles className="w-4 h-4 stroke-[2.5]" />
-                    <span>Dublar para Espanhol</span>
-                  </button>
-                )}
-
+              <div className="flex items-center gap-2">
                 {/* Save directly to iPhone Camera Roll / Share */}
                 <button
                   type="button"
@@ -283,32 +267,14 @@ export const RecordedVideosModal: React.FC<RecordedVideosModalProps> = ({
                 Toque no botão vermelho na câmera para gravar ou clique no botão abaixo para escolher uma foto/vídeo da galeria do seu iPhone:
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row items-center gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-lg active:scale-95"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Acessar Galeria do iPhone (Fotos)</span>
-              </button>
-
-              {onOpenDubbing && (
-                <button
-                  type="button"
-                  id="btn-open-dubbing-from-empty-gallery"
-                  onClick={() => {
-                    onClose();
-                    onOpenDubbing(null as any);
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-lg active:scale-95"
-                  title="Configurar OpenAI API Key ou Testar Dublagem"
-                >
-                  <Sparkles className="w-4 h-4 text-emerald-400" />
-                  <span>Configurar Chave OpenAI / Dublagem</span>
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-2 px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-lg active:scale-95"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Acessar Galeria do iPhone (Fotos)</span>
+            </button>
           </div>
         )}
 

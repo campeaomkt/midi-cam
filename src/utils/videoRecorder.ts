@@ -190,10 +190,6 @@ export class VideoRecorderManager {
           const numWhites = whiteKeyButtons.length;
           const keyW = kbWidth / numWhites;
 
-          const whiteMidis = whiteKeyButtons.map(
-            (btn) => parseInt(btn.id.replace('piano-key-white-', ''), 10) || 60
-          );
-
           cachedWhiteKeys = whiteKeyButtons.map((btn, idx) => {
             const midi = parseInt(btn.id.replace('piano-key-white-', ''), 10) || 60;
             return {
@@ -207,15 +203,11 @@ export class VideoRecorderManager {
 
           cachedBlackKeys = blackKeyButtons.map((btn) => {
             const midi = parseInt(btn.id.replace('piano-key-black-', ''), 10) || 61;
-            const seamAttr = btn.getAttribute('data-seam-index');
-            let seamIndex = seamAttr !== null && seamAttr !== '' ? parseInt(seamAttr, 10) : NaN;
-            if (isNaN(seamIndex)) {
-              seamIndex = whiteMidis.filter((wMidi) => wMidi < midi).length;
-            }
-
-            const bW = Math.max(6, keyW * 0.62);
-            const bX = kbX + seamIndex * keyW - bW / 2;
-            const bH = kbHeight * 0.63;
+            const styleLeft = parseFloat(btn.style.left) || 0;
+            const styleW = parseFloat(btn.style.width) || (keyW / kbWidth) * 60;
+            const bW = (styleW / 100) * kbWidth;
+            const bX = kbX + (styleLeft / 100) * kbWidth - bW / 2;
+            const bH = kbHeight * 0.62;
             return {
               midi,
               x: bX,
@@ -295,13 +287,9 @@ export class VideoRecorderManager {
           const activeNotes = getNotes();
           const hasNotes = activeNotes && activeNotes.length > 0;
 
-          // Keyboard outer casing & shadow
-          ctx.fillStyle = '#0d0d10';
-          ctx.fillRect(kbX - 2, kbY - 3, kbWidth + 4, kbHeight + 5);
-
-          // Top red felt cloth strip
-          ctx.fillStyle = '#991b1b';
-          ctx.fillRect(kbX, kbY - 2, kbWidth, 3);
+          // Keyboard background base
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(kbX, kbY, kbWidth, kbHeight);
 
           // Render White Keys
           for (let i = 0; i < cachedWhiteKeys.length; i++) {
@@ -311,21 +299,17 @@ export class VideoRecorderManager {
             if (isKeyActive) {
               ctx.save();
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 12;
+              ctx.shadowBlur = 10;
               ctx.fillStyle = activeColor;
               ctx.fillRect(key.x, key.y, key.w, key.h);
               ctx.restore();
             } else {
-              // Ivory key body
-              ctx.fillStyle = '#fafafa';
+              ctx.fillStyle = '#ffffff';
               ctx.fillRect(key.x, key.y, key.w, key.h);
-              // Bottom front edge shadow
-              ctx.fillStyle = '#e4e4e7';
-              ctx.fillRect(key.x, key.y + key.h - Math.min(8, key.h * 0.12), key.w, Math.min(8, key.h * 0.12));
             }
 
             // Key divider line
-            ctx.strokeStyle = '#d4d4d8';
+            ctx.strokeStyle = '#d1d5db';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(key.x + key.w, key.y);
@@ -341,17 +325,13 @@ export class VideoRecorderManager {
             if (isKeyActive) {
               ctx.save();
               ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 10;
+              ctx.shadowBlur = 8;
               ctx.fillStyle = activeDarkColor;
               ctx.fillRect(key.x, key.y, key.w, key.h);
               ctx.restore();
             } else {
-              // Ebony top body
               ctx.fillStyle = '#18181b';
               ctx.fillRect(key.x, key.y, key.w, key.h);
-              // Front vertical lip
-              ctx.fillStyle = '#09090b';
-              ctx.fillRect(key.x, key.y + key.h * 0.78, key.w, key.h * 0.22);
             }
           }
         }
