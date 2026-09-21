@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { KeyboardTheme, KeyCount, KeyboardVisualModel } from '../types';
+import { Isometric3DKeyboard } from './Isometric3DKeyboard';
 import {
   getEffectiveActiveColor,
   hexToRgba,
@@ -32,40 +33,66 @@ export function getKeyboardHeightClass(
   preset: 'slim' | 'normal' | 'compact' | string = 'normal'
 ): string {
   if (viewMode === 'scroll' && keyCount >= 61) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[84px] lg:h-[96px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[92px] lg:h-[106px]';
-    return 'h-[72px] sm:h-[82px] md:h-[102px] lg:h-[118px]';
+    if (preset === 'slim') return 'h-[57px] sm:h-[68px] md:h-[84px] lg:h-[96px]';
+    if (preset === 'compact') return 'h-[62px] sm:h-[74px] md:h-[92px] lg:h-[106px]';
+    return 'h-[67px] sm:h-[82px] md:h-[102px] lg:h-[118px]';
   }
 
-  // Exact proportions based on user's reference screenshot:
-  // On phone: ~70px, on tablet: ~96px-116px where keys are well-proportioned, distinct vertical rectangles.
+  // Exact proportions: subtle ~4-5px reduction on mobile (< sm) from the bottom, preserving tablet/desktop
   if (keyCount >= 61) {
-    if (preset === 'slim') return 'h-[58px] sm:h-[66px] md:h-[84px] lg:h-[96px]';
-    if (preset === 'compact') return 'h-[64px] sm:h-[72px] md:h-[92px] lg:h-[106px]';
-    return 'h-[70px] sm:h-[80px] md:h-[100px] lg:h-[116px]';
+    if (preset === 'slim') return 'h-[55px] sm:h-[66px] md:h-[84px] lg:h-[96px]';
+    if (preset === 'compact') return 'h-[60px] sm:h-[72px] md:h-[92px] lg:h-[106px]';
+    return 'h-[65px] sm:h-[80px] md:h-[100px] lg:h-[116px]';
   }
 
   // 44 & 49 keys:
   if (keyCount >= 44) {
-    if (preset === 'slim') return 'h-[60px] sm:h-[68px] md:h-[86px] lg:h-[98px]';
-    if (preset === 'compact') return 'h-[66px] sm:h-[74px] md:h-[94px] lg:h-[108px]';
-    return 'h-[72px] sm:h-[82px] md:h-[104px] lg:h-[120px]';
+    if (preset === 'slim') return 'h-[57px] sm:h-[68px] md:h-[86px] lg:h-[98px]';
+    if (preset === 'compact') return 'h-[62px] sm:h-[74px] md:h-[94px] lg:h-[108px]';
+    return 'h-[67px] sm:h-[82px] md:h-[104px] lg:h-[120px]';
   }
 
   // 37 keys:
   if (keyCount >= 37) {
-    if (preset === 'slim') return 'h-[62px] sm:h-[70px] md:h-[88px] lg:h-[100px]';
-    if (preset === 'compact') return 'h-[68px] sm:h-[76px] md:h-[96px] lg:h-[110px]';
-    return 'h-[74px] sm:h-[84px] md:h-[106px] lg:h-[122px]';
+    if (preset === 'slim') return 'h-[59px] sm:h-[70px] md:h-[88px] lg:h-[100px]';
+    if (preset === 'compact') return 'h-[64px] sm:h-[76px] md:h-[96px] lg:h-[110px]';
+    return 'h-[69px] sm:h-[84px] md:h-[106px] lg:h-[122px]';
   }
 
   // 25 & 32 keys:
-  if (preset === 'slim') return 'h-[64px] sm:h-[72px] md:h-[90px] lg:h-[104px]';
-  if (preset === 'compact') return 'h-[70px] sm:h-[78px] md:h-[98px] lg:h-[114px]';
-  return 'h-[76px] sm:h-[86px] md:h-[110px] lg:h-[126px]';
+  if (preset === 'slim') return 'h-[61px] sm:h-[72px] md:h-[90px] lg:h-[104px]';
+  if (preset === 'compact') return 'h-[66px] sm:h-[78px] md:h-[98px] lg:h-[114px]';
+  return 'h-[71px] sm:h-[86px] md:h-[110px] lg:h-[126px]';
 }
 
-interface KeyData {
+/**
+ * Maintains the exact original black key size on mobile (< sm),
+ * ensuring the height reduction comes exclusively off the bottom of the white keys.
+ */
+export function getBlackKeyHeightClass(
+  keyCount: KeyCount,
+  preset: 'slim' | 'normal' | 'compact' | string = 'normal'
+): string {
+  if (preset === 'slim') {
+    if (keyCount >= 61) return 'h-[37px] sm:h-[63%]';
+    if (keyCount >= 44) return 'h-[38px] sm:h-[63%]';
+    if (keyCount >= 37) return 'h-[39px] sm:h-[63%]';
+    return 'h-[40px] sm:h-[63%]';
+  }
+  if (preset === 'compact') {
+    if (keyCount >= 61) return 'h-[40px] sm:h-[63%]';
+    if (keyCount >= 44) return 'h-[41px] sm:h-[63%]';
+    if (keyCount >= 37) return 'h-[42px] sm:h-[63%]';
+    return 'h-[44px] sm:h-[63%]';
+  }
+  // Normal (default)
+  if (keyCount >= 61) return 'h-[44px] sm:h-[63%]';
+  if (keyCount >= 44) return 'h-[45px] sm:h-[63%]';
+  if (keyCount >= 37) return 'h-[46px] sm:h-[63%]';
+  return 'h-[48px] sm:h-[63%]';
+}
+
+export interface KeyData {
   midi: number;
   pitchClass: number;
   isBlack: boolean;
@@ -351,6 +378,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   const blackWidthPercent = (1 / totalWhiteKeys) * 60;
 
   const heightClass = getKeyboardHeightClass(effectiveKeyCount, viewMode, heightPreset);
+  const blackKeyHeightClass = getBlackKeyHeightClass(effectiveKeyCount, heightPreset);
   const noteLabelSize = effectiveKeyCount >= 61 
     ? 'text-[6.5px] sm:text-[7.5px] md:text-[9.5px] lg:text-[10.5px]' 
     : effectiveKeyCount >= 44 
@@ -360,7 +388,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
     ? 'text-[5.5px] sm:text-[6.5px] md:text-[8.5px]' 
     : 'text-[7px] sm:text-[8px] md:text-[9.5px]';
 
-  const isModel3D = visualModel === 'realistic-3d' || !visualModel || visualModel === 'realistic-acoustic';
+  const isModel3D = visualModel === 'realistic-3d' || !visualModel;
 
   return (
     <div
@@ -376,30 +404,118 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         ref={scrollContainerRef}
         className={`relative w-full ${heightClass} overflow-hidden touch-none select-none ${
           isModel3D
-            ? 'bg-[#18181b] p-[2px] pb-[4px] shadow-[0_16px_36px_rgba(0,0,0,0.8),0_4px_12px_rgba(0,0,0,0.6)] border-t border-white/20 border-x border-neutral-900 border-b-2 border-black rounded-t-sm rounded-b-md'
+            ? 'bg-black shadow-[0_20px_40px_rgba(0,0,0,0.95)]'
             : 'bg-white border border-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.45)]'
         }`}
       >
-        <div className="relative h-full w-full flex touch-none">
-          {/* White Keys Container */}
-          <div className="relative w-full h-full flex touch-none items-stretch">
-            {whiteKeys.map((key) => {
+        {isModel3D ? (
+          <Isometric3DKeyboard
+            whiteKeys={whiteKeys}
+            blackKeys={blackKeys}
+            totalWhiteKeys={totalWhiteKeys}
+            activeSet={activeSet}
+            effectiveColor={effectiveColor}
+            lighterColor={lighterColor}
+            darkerColor={darkerColor}
+            deepDarkColor={deepDarkColor}
+            glowIntensity={glowIntensity}
+            showNoteNames={showNoteNames}
+            onNotePlay={onNotePlay}
+            onNoteRelease={onNoteRelease}
+          />
+        ) : (
+          <div className="relative h-full w-full flex touch-none">
+            {/* Red Felt for Acoustic model */}
+            {visualModel === 'realistic-acoustic' && (
+              <div className="absolute top-0 inset-x-0 h-[2.5px] bg-[#991b1b] z-25 pointer-events-none border-b border-[#7f1d1d]" />
+            )}
+
+            {/* White Keys Container */}
+            <div className="relative w-full h-full flex touch-none items-stretch">
+              {whiteKeys.map((key) => {
+                const isActive = activeSet.has(key.midi);
+
+                return (
+                  <button
+                    key={key.midi}
+                    id={`piano-key-white-${key.midi}`}
+                    type="button"
+                    tabIndex={-1}
+                    className={`relative flex-1 h-full flex flex-col justify-end items-center cursor-pointer select-none touch-none outline-none border-r last:border-r-0 border-neutral-300 ${
+                      isActive ? 'z-10' : ''
+                    }`}
+                    style={{
+                      boxShadow: isActive ? boxShadowStr : undefined,
+                    }}
+                    onMouseDown={() => handleTouchStart(key.midi)}
+                    onMouseUp={() => handleTouchEnd(key.midi)}
+                    onMouseLeave={() => {
+                      if (touchActiveNotes.current.has(key.midi)) {
+                        handleTouchEnd(key.midi);
+                      }
+                    }}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      handleTouchStart(key.midi);
+                    }}
+                    onTouchMove={(e) => {
+                      e.preventDefault();
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
+                      handleTouchEnd(key.midi);
+                    }}
+                    onTouchCancel={(e) => {
+                      e.preventDefault();
+                      handleTouchEnd(key.midi);
+                    }}
+                    onContextMenu={(e) => e.preventDefault()}
+                  >
+                    <div
+                      className="w-full h-full flex flex-col justify-end items-center pb-0.5 sm:pb-1"
+                      style={{
+                        background: isActive
+                          ? `linear-gradient(180deg, ${lighterColor} 0%, ${effectiveColor} 100%)`
+                          : visualModel === 'realistic-acoustic'
+                          ? 'linear-gradient(180deg, #ffffff 0%, #fafafa 45%, #f4f4f7 85%, #eaeaf0 100%)'
+                          : '#ffffff',
+                      }}
+                    >
+                      {showNoteNames && (
+                        <span
+                          className={`${noteLabelSize} font-bold tracking-tight pointer-events-none select-none ${
+                            isActive ? 'text-neutral-900 font-black' : 'text-zinc-500'
+                          }`}
+                        >
+                          {key.pitchClass === 0 || key.whiteIndex === 0
+                            ? `${key.name}${key.octave}`
+                            : key.name}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Black Keys */}
+            {blackKeys.map((key) => {
               const isActive = activeSet.has(key.midi);
 
               return (
                 <button
                   key={key.midi}
-                  id={`piano-key-white-${key.midi}`}
+                  id={`piano-key-black-${key.midi}`}
                   type="button"
                   tabIndex={-1}
-                  className={`relative flex-1 h-full flex flex-col justify-end items-center cursor-pointer select-none touch-none outline-none ${
-                    isModel3D
-                      ? 'mr-[1px] last:mr-0 border-l border-r border-[#262626] rounded-b-[2px] overflow-hidden'
-                      : 'border-r last:border-r-0 border-neutral-300 rounded-none'
-                  } ${isActive ? 'z-10' : ''}`}
                   style={{
+                    left: `${key.blackPositionPercent}%`,
+                    width: `${blackWidthPercent}%`,
                     boxShadow: isActive ? boxShadowStr : undefined,
                   }}
+                  className={`absolute top-0 ${blackKeyHeightClass} -translate-x-1/2 cursor-pointer select-none touch-none outline-none z-20 flex flex-col justify-end items-center ${
+                    visualModel === 'realistic-acoustic' ? 'rounded-b-[2px]' : 'rounded-none pb-0.5'
+                  }`}
                   onMouseDown={() => handleTouchStart(key.midi)}
                   onMouseUp={() => handleTouchEnd(key.midi)}
                   onMouseLeave={() => {
@@ -424,185 +540,16 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                   }}
                   onContextMenu={(e) => e.preventDefault()}
                 >
-                  {isModel3D ? (
-                    <div className="relative w-full h-full flex flex-col justify-between select-none pointer-events-none">
-                      {/* Top Main Surface: crisp white with subtle vertical gradient */}
-                      <div
-                        className="relative w-full flex-1 flex flex-col justify-end items-center pb-1"
-                        style={{
-                          background: isActive
-                            ? `linear-gradient(180deg, ${lighterColor} 0%, ${effectiveColor} 70%, ${darkerColor} 100%)`
-                            : 'linear-gradient(180deg, #ffffff 0%, #fdfdfd 40%, #f4f4f6 80%, #ebebef 100%)',
-                          boxShadow: isActive
-                            ? 'inset 0 1px 3px rgba(0,0,0,0.2)'
-                            : 'inset 0 1px 0 #ffffff, inset 1px 0 0 rgba(255,255,255,0.7)',
-                        }}
-                      >
-                        {/* Note Label */}
-                        {showNoteNames && (
-                          <span
-                            className={`${noteLabelSize} font-bold tracking-tight pointer-events-none select-none z-10 ${
-                              isActive ? 'text-neutral-950 font-black' : 'text-zinc-600'
-                            }`}
-                          >
-                            {key.pitchClass === 0 || key.whiteIndex === 0
-                              ? `${key.name}${key.octave}`
-                              : key.name}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Crisp Chamfer Step Divider (The horizontal joint line) */}
-                      <div
-                        className="w-full h-[1px]"
-                        style={{
-                          backgroundColor: isActive ? deepDarkColor : '#222225',
-                          opacity: isActive ? 0.9 : 0.85,
-                        }}
-                      />
-
-                      {/* Front Bevel Lip (The 3D front face exactly like the reference screenshot) */}
-                      <div
-                        className="relative w-full h-[14%] min-h-[9px] max-h-[16px] rounded-b-[2px] flex items-center justify-center"
-                        style={{
-                          background: isActive
-                            ? `linear-gradient(180deg, ${darkerColor} 0%, ${deepDarkColor} 100%)`
-                            : 'linear-gradient(180deg, #d8d8de 0%, #bcbcc4 50%, #9e9ea8 100%)',
-                          borderTop: isActive ? 'none' : '1px solid rgba(255,255,255,0.5)',
-                          borderBottom: '2px solid #000000',
-                          boxShadow: isActive
-                            ? 'inset 0 1px 2px rgba(0,0,0,0.5)'
-                            : 'inset 0 -1px 1px rgba(0,0,0,0.4)',
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    /* Minimal Flat 2D Model */
-                    <>
-                      <div
-                        className="w-full h-full flex flex-col justify-end items-center pb-1"
-                        style={{
-                          background: isActive
-                            ? `linear-gradient(180deg, ${lighterColor} 0%, ${effectiveColor} 100%)`
-                            : '#ffffff',
-                        }}
-                      >
-                        {showNoteNames && (
-                          <span
-                            className={`${noteLabelSize} font-bold tracking-tight pointer-events-none select-none ${
-                              isActive ? 'text-neutral-900' : 'text-zinc-500'
-                            }`}
-                          >
-                            {key.pitchClass === 0 || key.whiteIndex === 0
-                              ? `${key.name}${key.octave}`
-                              : key.name}
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Black Keys: positioned precisely at seam between adjacent white keys */}
-          {blackKeys.map((key) => {
-            const isActive = activeSet.has(key.midi);
-
-            return (
-              <button
-                key={key.midi}
-                id={`piano-key-black-${key.midi}`}
-                type="button"
-                tabIndex={-1}
-                style={{
-                  left: `${key.blackPositionPercent}%`,
-                  width: `${blackWidthPercent}%`,
-                  boxShadow: isActive ? boxShadowStr : undefined,
-                }}
-                className={`absolute top-0 h-[63%] -translate-x-1/2 cursor-pointer select-none touch-none outline-none z-20 flex flex-col justify-end items-center pb-1 ${
-                  isModel3D
-                    ? 'rounded-b-[2px] overflow-hidden'
-                    : 'rounded-none'
-                }`}
-                onMouseDown={() => handleTouchStart(key.midi)}
-                onMouseUp={() => handleTouchEnd(key.midi)}
-                onMouseLeave={() => {
-                  if (touchActiveNotes.current.has(key.midi)) {
-                    handleTouchEnd(key.midi);
-                  }
-                }}
-                onTouchStart={(e) => {
-                  e.preventDefault();
-                  handleTouchStart(key.midi);
-                }}
-                onTouchMove={(e) => {
-                  e.preventDefault();
-                }}
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  handleTouchEnd(key.midi);
-                }}
-                onTouchCancel={(e) => {
-                  e.preventDefault();
-                  handleTouchEnd(key.midi);
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-              >
-                {isModel3D ? (
-                  <div className="relative w-full h-full flex flex-col justify-between pointer-events-none select-none">
-                    {/* Top Surface of Ebony Black Key with 3D bevels */}
-                    <div
-                      className="relative w-full flex-1 flex flex-col justify-end items-center pb-0.5 border-l border-r border-black"
-                      style={{
-                        background: isActive
-                          ? `linear-gradient(180deg, ${lighterColor} 0%, ${effectiveColor} 60%, ${darkerColor} 100%)`
-                          : 'linear-gradient(180deg, #303034 0%, #1e1e22 50%, #121215 100%)',
-                        boxShadow: isActive
-                          ? 'inset 0 1px 2px rgba(0,0,0,0.3)'
-                          : 'inset 1px 0 0 rgba(255,255,255,0.18), inset -1px 0 0 rgba(0,0,0,0.9), 2px 4px 6px rgba(0,0,0,0.7)',
-                      }}
-                    >
-                      {/* Top bevel sheen */}
-                      <div className="absolute top-0 inset-x-[1px] h-[3px] bg-white/[0.15] rounded-t-sm pointer-events-none" />
-
-                      {showNoteNames && (
-                        <span
-                          className={`${blackNoteLabelSize} font-bold pointer-events-none select-none ${
-                            isActive ? 'text-black font-black' : 'text-zinc-400'
-                          }`}
-                        >
-                          {key.name}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Step line for black key */}
-                    <div
-                      className="w-full h-[1px]"
-                      style={{
-                        backgroundColor: isActive ? deepDarkColor : '#0a0a0c',
-                      }}
-                    />
-
-                    {/* Black Key Front Bevel Lip Face (matches the active tip in reference screenshot!) */}
-                    <div
-                      className="w-full h-[14%] min-h-[5px] max-h-[9px] rounded-b-[2px] border-l border-r border-black"
-                      style={{
-                        background: isActive
-                          ? `linear-gradient(180deg, ${darkerColor} 0%, ${deepDarkColor} 100%)`
-                          : 'linear-gradient(180deg, #1c1c20 0%, #0d0d10 60%, #000000 100%)',
-                        borderBottom: '1px solid #000000',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.8)',
-                      }}
-                    />
-                  </div>
-                ) : (
                   <div
-                    className="w-full h-full flex flex-col justify-end items-center pb-0.5"
+                    className={`w-full h-full flex flex-col justify-end items-center pb-0.5 ${
+                      visualModel === 'realistic-acoustic' ? 'rounded-b-[2px]' : ''
+                    }`}
                     style={{
-                      background: isActive ? effectiveColor : '#18181b',
+                      background: isActive
+                        ? effectiveColor
+                        : visualModel === 'realistic-acoustic'
+                        ? 'linear-gradient(180deg, #2e2e32 0%, #1e1e22 55%, #141416 100%)'
+                        : '#18181b',
                     }}
                   >
                     {showNoteNames && (
@@ -615,11 +562,11 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                       </span>
                     )}
                   </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

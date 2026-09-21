@@ -478,7 +478,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {
                 id: 'realistic-3d',
                 title: 'Acústico 3D Realista',
-                desc: 'Face frontal chanfrada em cada tecla, feltro vermelho e marfim acetinado',
+                desc: 'Perspectiva isométrica 3D com linhas finas, faces frontais cinzas e teclas pretas extrusionadas',
                 badge: 'Recomendado',
               },
               {
@@ -521,25 +521,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
 
                   {/* Micro Visual Preview */}
-                  <div className="w-full h-4 rounded overflow-hidden flex items-stretch border border-white/15 mt-1 bg-neutral-900">
-                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-neutral-300">
-                      <div className="h-[2px] bg-red-700/80 w-full" />
+                  <div className="w-full h-4 rounded overflow-hidden flex items-stretch border border-white/15 mt-1 bg-black">
+                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-[#1c1c1f]">
+                      {model.id === 'realistic-acoustic' && <div className="h-[2px] bg-red-700/80 w-full" />}
+                      <div className="flex-1" />
                       {model.id === 'realistic-3d' && (
-                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                        <div className="h-1.5 bg-[#8f929b] w-full border-t border-[#1c1c1f]" />
                       )}
                     </div>
-                    <div className="w-2.5 h-[65%] bg-black -mx-1 z-10 rounded-b-[1px] border-x border-neutral-700" />
-                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-neutral-300">
-                      <div className="h-[2px] bg-red-700/80 w-full" />
+                    <div className={`w-2.5 h-[65%] -mx-1 z-10 flex flex-col ${model.id === 'realistic-3d' ? 'bg-[#25262a] border border-[#141416]' : 'bg-black border-x border-neutral-700 rounded-b-[1px]'}`}>
                       {model.id === 'realistic-3d' && (
-                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                        <>
+                          <div className="flex-1" />
+                          <div className="h-1 bg-[#0c0d0f] w-full" />
+                        </>
                       )}
                     </div>
-                    <div className="w-2.5 h-[65%] bg-black -mx-1 z-10 rounded-b-[1px] border-x border-neutral-700" />
+                    <div className="flex-1 h-full bg-white flex flex-col justify-between border-r border-[#1c1c1f]">
+                      {model.id === 'realistic-acoustic' && <div className="h-[2px] bg-red-700/80 w-full" />}
+                      <div className="flex-1" />
+                      {model.id === 'realistic-3d' && (
+                        <div className="h-1.5 bg-[#8f929b] w-full border-t border-[#1c1c1f]" />
+                      )}
+                    </div>
+                    <div className="w-2.5 h-[65%] -mx-1 z-10 flex flex-col ${model.id === 'realistic-3d' ? 'bg-[#25262a] border border-[#141416]' : 'bg-black border-x border-neutral-700 rounded-b-[1px]'}">
+                      {model.id === 'realistic-3d' && (
+                        <>
+                          <div className="flex-1" />
+                          <div className="h-1 bg-[#0c0d0f] w-full" />
+                        </>
+                      )}
+                    </div>
                     <div className="flex-1 h-full bg-white flex flex-col justify-between">
-                      <div className="h-[2px] bg-red-700/80 w-full" />
+                      {model.id === 'realistic-acoustic' && <div className="h-[2px] bg-red-700/80 w-full" />}
+                      <div className="flex-1" />
                       {model.id === 'realistic-3d' && (
-                        <div className="h-1 bg-neutral-400/90 w-full border-b border-neutral-700" />
+                        <div className="h-1.5 bg-[#8f929b] w-full border-t border-[#1c1c1f]" />
                       )}
                     </div>
                   </div>
