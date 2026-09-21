@@ -53,6 +53,84 @@ class AudioSynthManager {
     return this.streamDestination;
   }
 
+  private activeRecordingMicSource: MediaStreamAudioSourceNode | null = null;
+
+  /**
+   * Creates a dedicated mixed MediaStream for video recording.
+   * If micStream is provided, mixes keyboard synth audio + microphone audio.
+   * Balanced gain staging prevents digital clipping and avoids browser ducking/distortion.
+   * Microphone is routed ONLY to the recording stream, avoiding acoustic loop feedback to speakers.
+   */
+  public getRecordingAudioStream(micStream?: MediaStream | null, micGainMultiplier: number = 1.0): {
+    stream: MediaStream;
+    cleanup: () => void;
+  } {
+    this.initContext();
+    const ctx = this.ctx!;
+    const recDest = ctx.createMediaStreamDestination();
+
+    const hasMic = Boolean(micStream && micStream.getAudioTracks().length > 0);
+
+    // Studio Master Peak Limiter on the combined recording output (identical to OBS Master Limiter)
+    // Threshold is set to -0.1 dB so audio below 99% is 100% untouched (pure 1:1 unity gain, full volume).
+    // It only catches extreme peaks when voice and piano hit maximum simultaneously, avoiding digital clipping.
+    const masterLimiter = ctx.createDynamicsCompressor();
+    masterLimiter.threshold.setValueAtTime(-0.1, ctx.currentTime);
+    masterLimiter.knee.setValueAtTime(0, ctx.currentTime);
+    masterLimiter.ratio.setValueAtTime(20, ctx.currentTime);
+    masterLimiter.attack.setValueAtTime(0.001, ctx.currentTime);
+    masterLimiter.release.setValueAtTime(0.05, ctx.currentTime);
+    masterLimiter.connect(recDest);
+
+    // Dedicated gain for keyboard audio into the recording destination: 1.0 (100% standard unity gain like OBS)
+    const keyboardRecGain = ctx.createGain();
+    keyboardRecGain.gain.setValueAtTime(1.0, ctx.currentTime);
+    this.masterGain!.connect(keyboardRecGain);
+    keyboardRecGain.connect(masterLimiter);
+
+    let micSource: MediaStreamAudioSourceNode | null = null;
+    let micGain: GainNode | null = null;
+
+    if (hasMic && micStream) {
+      try {
+        micSource = ctx.createMediaStreamSource(micStream);
+        this.activeRecordingMicSource = micSource; // keep reference to prevent GC in Chrome/Safari
+
+        // Microphone gain into the recording destination: 1.0 default (100% standard unity gain like OBS)
+        micGain = ctx.createGain();
+        const safeMicGain = Math.max(0.1, Math.min(3.0, micGainMultiplier));
+        micGain.gain.setValueAtTime(safeMicGain, ctx.currentTime);
+
+        micSource.connect(micGain);
+        micGain.connect(masterLimiter);
+      } catch (err) {
+        console.warn('Failed to connect mic to recording destination:', err);
+      }
+    }
+
+    const cleanup = () => {
+      try {
+        this.masterGain?.disconnect(keyboardRecGain);
+        keyboardRecGain.disconnect();
+        if (micSource && micGain) {
+          micSource.disconnect();
+          micGain.disconnect();
+        }
+        masterLimiter.disconnect();
+        if (this.activeRecordingMicSource === micSource) {
+          this.activeRecordingMicSource = null;
+        }
+        if (micStream) {
+          micStream.getTracks().forEach((t) => t.stop());
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    return { stream: recDest.stream, cleanup };
+  }
+
   public setVolume(vol: number) {
     this.volume = Math.max(0, Math.min(1, vol));
     if (this.masterGain && this.ctx) {

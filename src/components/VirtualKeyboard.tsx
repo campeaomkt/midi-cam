@@ -228,6 +228,67 @@ export function getKeyRange(
   };
 }
 
+export function generateKeyboardLayout(
+  keyCount: KeyCount,
+  octaveShift: number = 0
+): {
+  whiteKeys: KeyData[];
+  blackKeys: KeyData[];
+  totalWhiteKeys: number;
+} {
+  const { startMidi, totalKeys } = getKeyRange(keyCount, octaveShift);
+  const whites: KeyData[] = [];
+  const blacks: { midi: number; pitchClass: number; name: string; octave: number; seamIndex: number }[] = [];
+
+  for (let i = 0; i < totalKeys; i++) {
+    const midi = startMidi + i;
+    const pitchClass = midi % 12;
+    const isBlack = BLACK_PITCHES.has(pitchClass);
+    const name = PITCH_NAMES[pitchClass];
+    const oct = Math.floor(midi / 12) - 1;
+
+    if (!isBlack) {
+      whites.push({
+        midi,
+        pitchClass,
+        isBlack: false,
+        name,
+        octave: oct,
+        whiteIndex: whites.length,
+      });
+    } else {
+      blacks.push({
+        midi,
+        pitchClass,
+        name,
+        octave: oct,
+        seamIndex: whites.length,
+      });
+    }
+  }
+
+  const totalWhites = whites.length;
+
+  const calculatedBlacks: KeyData[] = blacks.map((b) => {
+    const leftPercent = (b.seamIndex / totalWhites) * 100;
+    return {
+      midi: b.midi,
+      pitchClass: b.pitchClass,
+      isBlack: true,
+      name: b.name,
+      octave: b.octave,
+      whiteIndex: b.seamIndex,
+      blackPositionPercent: leftPercent,
+    };
+  });
+
+  return {
+    whiteKeys: whites,
+    blackKeys: calculatedBlacks,
+    totalWhiteKeys: totalWhites,
+  };
+}
+
 export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   activeNotes = [],
   keyCount,
@@ -300,68 +361,10 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   // - 3 last black keys (F#, G#, A#) are precisely in the middle between the 4 last white keys (F, G, A, B)
   // - Between E and F: half-step, NO black key!
   // - Between B and next C: half-step, NO black key!
-  const { whiteKeys, blackKeys, totalWhiteKeys } = useMemo(() => {
-    const { startMidi, totalKeys } = getKeyRange(effectiveKeyCount, octaveShift);
-    const whites: KeyData[] = [];
-    const blacks: { midi: number; pitchClass: number; name: string; octave: number; seamIndex: number }[] = [];
-
-    for (let i = 0; i < totalKeys; i++) {
-      const midi = startMidi + i;
-      const pitchClass = midi % 12;
-      const isBlack = BLACK_PITCHES.has(pitchClass);
-      const name = PITCH_NAMES[pitchClass];
-      const oct = Math.floor(midi / 12) - 1;
-
-      if (!isBlack) {
-        whites.push({
-          midi,
-          pitchClass,
-          isBlack: false,
-          name,
-          octave: oct,
-          whiteIndex: whites.length,
-        });
-      } else {
-        // At the moment of adding a black key, whites.length is the seam index
-        // dividing the white key immediately to the left and the white key to the right!
-        // E.g. after C (whites.length=1), C# sits at seam index 1 (between C and D).
-        // After D (whites.length=2), D# sits at seam index 2 (between D and E).
-        // (E is added: whites.length=3, F is added: whites.length=4; no black key between E and F).
-        // After F (whites.length=4), F# sits at seam index 4 (between F and G).
-        // After G (whites.length=5), G# sits at seam index 5 (between G and A).
-        // After A (whites.length=6), A# sits at seam index 6 (between A and B).
-        blacks.push({
-          midi,
-          pitchClass,
-          name,
-          octave: oct,
-          seamIndex: whites.length,
-        });
-      }
-    }
-
-    const totalWhites = whites.length;
-
-    // Calculate position percent for each black key centered right on the seam
-    const calculatedBlacks: KeyData[] = blacks.map((b) => {
-      const leftPercent = (b.seamIndex / totalWhites) * 100;
-      return {
-        midi: b.midi,
-        pitchClass: b.pitchClass,
-        isBlack: true,
-        name: b.name,
-        octave: b.octave,
-        whiteIndex: b.seamIndex,
-        blackPositionPercent: leftPercent,
-      };
-    });
-
-    return {
-      whiteKeys: whites,
-      blackKeys: calculatedBlacks,
-      totalWhiteKeys: totalWhites,
-    };
-  }, [effectiveKeyCount, octaveShift]);
+  const { whiteKeys, blackKeys, totalWhiteKeys } = useMemo(
+    () => generateKeyboardLayout(effectiveKeyCount, octaveShift),
+    [effectiveKeyCount, octaveShift]
+  );
 
   // Touch & Mouse event handlers
   const handleTouchStart = (midi: number) => {
@@ -402,10 +405,10 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
       {/* 3D Isometric Piano Bed / Base Housing */}
       <div
         ref={scrollContainerRef}
-        className={`relative w-full ${heightClass} overflow-visible touch-none select-none ${
+        className={`relative w-full overflow-visible touch-none select-none flex items-center justify-center ${
           isModel3D
-            ? 'bg-transparent'
-            : 'bg-white border border-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.45)]'
+            ? 'bg-transparent h-auto aspect-[1200/280] max-h-[140px]'
+            : `${heightClass} bg-white border border-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.45)]`
         }`}
       >
         {isModel3D ? (

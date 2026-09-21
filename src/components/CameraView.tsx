@@ -80,6 +80,35 @@ export const CameraView: React.FC<CameraViewProps> = ({
     let mediaStream: MediaStream | null = null;
     let lastErrorMsg = '';
 
+    // Step 0: Try specific user-selected camera device if configured
+    if (cameraSettings.selectedVideoDeviceId) {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            deviceId: { exact: cameraSettings.selectedVideoDeviceId },
+            width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+            height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+          },
+          audio: false,
+        };
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (devErr1) {
+        console.warn('Exact deviceId failed, trying ideal deviceId...', devErr1);
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { ideal: cameraSettings.selectedVideoDeviceId },
+              width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+              height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+            },
+            audio: false,
+          });
+        } catch (devErr2) {
+          console.warn('Ideal deviceId failed, falling back to facingMode...', devErr2);
+        }
+      }
+    }
+
     // Step 1: Standard mobile constraints with ideal facingMode
     try {
       const constraints: MediaStreamConstraints = {
@@ -190,6 +219,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     cameraSettings.facingMode,
     cameraSettings.resolution,
     cameraSettings.flashEnabled,
+    cameraSettings.selectedVideoDeviceId,
     videoRef,
   ]);
 
@@ -251,6 +281,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
   // Combined CSS filter string
   const cssFilterValue = getCombinedFilterStyle(activeFilter, filterAdjustments);
 
+  // Keyboard drag and drop vertical positioning state
+  const [isDraggingKeyboard, setIsDraggingKeyboard] = useState<boolean>(false);
+  const dragStartYRef = useRef<number>(0);
+  const dragStartPercentRef = useRef<number>(20);
+
   // Keyboard vertical positioning mapping
   const positionClasses: Record<KeyboardSettings['position'], string> = {
     top: 'top-14 sm:top-16',
@@ -258,6 +293,54 @@ export const CameraView: React.FC<CameraViewProps> = ({
     middle: 'top-[42%] -translate-y-1/2',
     'lower-third': 'bottom-[22%] sm:bottom-[24%]',
     bottom: 'bottom-20 sm:bottom-24',
+  };
+
+  const handleKeyboardDragStart = (e: React.PointerEvent) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+    const container = containerRef.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const startY = e.clientY;
+
+    let currentPct = keyboardSettings.customYPercent;
+    if (currentPct === undefined) {
+      const presetPcts: Record<string, number> = {
+        top: 12,
+        'upper-third': 20,
+        middle: 45,
+        'lower-third': 65,
+        bottom: 78,
+      };
+      currentPct = presetPcts[keyboardSettings.position] || 20;
+    }
+    const startPercent = currentPct;
+    let isDragging = false;
+
+    const handlePointerMove = (moveEv: PointerEvent) => {
+      const deltaY = moveEv.clientY - startY;
+      if (!isDragging && Math.abs(deltaY) > 3) {
+        isDragging = true;
+        setIsDraggingKeyboard(true);
+      }
+      if (isDragging) {
+        moveEv.preventDefault();
+        const deltaPct = (deltaY / containerRect.height) * 100;
+        const newPct = Math.max(5, Math.min(82, startPercent + deltaPct));
+        onUpdateKeyboard?.({ customYPercent: Math.round(newPct * 10) / 10 });
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingKeyboard(false);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
   };
 
   // Touch on screen plays video if paused by iOS
@@ -275,7 +358,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
       id="camera-viewport-container"
       ref={containerRef}
       onClick={handleViewportClick}
-      className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
+      className={`relative h-full bg-black overflow-hidden flex items-center justify-center select-none ${
+        (cameraSettings.aspectRatio || '9:16') === '9:16'
+          ? 'w-full max-w-[calc(100vh*9/16)] mx-auto border-x border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)]'
+          : 'w-full'
+      }`}
     >
       {/* Permanent Video Element in DOM so ref and srcObject are NEVER null */}
       <div
@@ -440,22 +527,37 @@ export const CameraView: React.FC<CameraViewProps> = ({
       {keyboardSettings.visible && (
         <div
           id="keyboard-and-chord-overlay"
+          style={
+            keyboardSettings.customYPercent !== undefined
+              ? { top: `${keyboardSettings.customYPercent}%` }
+              : undefined
+          }
           className={`absolute inset-x-0 z-20 flex flex-col items-center pointer-events-auto select-none touch-none ${
-            positionClasses[keyboardSettings.position]
+            keyboardSettings.customYPercent !== undefined
+              ? ''
+              : positionClasses[keyboardSettings.position]
           }`}
         >
           <div className="relative w-full flex flex-col items-center">
-            {/* Real-time Detected Chord Display - Fixed height container so it NEVER shifts the keyboard */}
-            <div className="w-full h-10 sm:h-13 flex items-center justify-center pointer-events-none select-none">
-              <ChordDisplay
-                chord={currentChord}
-                fontSize={chordFontSize}
-                color={chordColor}
-              />
-            </div>
+            {/* CHORD ABOVE (Default) */}
+            {(keyboardSettings.chordPlacement || 'above') === 'above' && (
+              <div className="w-full h-9 sm:h-12 flex items-center justify-center pointer-events-none select-none">
+                <ChordDisplay
+                  chord={currentChord}
+                  fontSize={chordFontSize}
+                  color={chordColor}
+                  aspectRatio={cameraSettings.aspectRatio}
+                />
+              </div>
+            )}
 
-            {/* Virtual Keyboard with crisp straight edges, soft shadow, static touch */}
-            <div className="w-full flex justify-center touch-none select-none">
+            {/* Virtual Keyboard: Direct click, hold and drag anywhere on the keyboard to reposition */}
+            <div
+              id="virtual-keyboard-drag-wrapper"
+              onPointerDown={handleKeyboardDragStart}
+              className="w-full flex justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+              title="Clique, mantenha pressionado e arraste para mudar a posição do teclado"
+            >
               <VirtualKeyboard
                 activeNotes={activeNotes}
                 keyCount={keyboardSettings.keyCount}
@@ -473,6 +575,18 @@ export const CameraView: React.FC<CameraViewProps> = ({
                 onNoteRelease={onNoteRelease}
               />
             </div>
+
+            {/* CHORD BELOW (When selected by user in Settings) */}
+            {keyboardSettings.chordPlacement === 'below' && (
+              <div className="w-full h-9 sm:h-12 flex items-center justify-center pointer-events-none select-none mt-1">
+                <ChordDisplay
+                  chord={currentChord}
+                  fontSize={chordFontSize}
+                  color={chordColor}
+                  aspectRatio={cameraSettings.aspectRatio}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

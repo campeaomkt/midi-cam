@@ -76,6 +76,8 @@ export interface KeyboardSettings {
   octaveShift?: number; // fine octave offset -2, -1, 0, +1, +2
   heightPreset?: 'slim' | 'normal' | 'compact'; // height profile for overlay
   position: 'top' | 'upper-third' | 'middle' | 'lower-third' | 'bottom';
+  customYPercent?: number; // Custom drag Y position in percentage (0 - 100)
+  chordPlacement?: 'above' | 'below'; // Chord displayed above or below keyboard
   theme: KeyboardTheme;
   customColor?: string; // Hex color e.g. #3bf5b0 for complete color customization
   showNoteNames: boolean;
@@ -87,6 +89,12 @@ export interface KeyboardSettings {
   viewMode: 'fit' | 'scroll'; // 'fit' fits entire piano on screen, 'scroll' allows touch navigation
 }
 
+export interface MediaDeviceOption {
+  deviceId: string;
+  label: string;
+  kind: 'videoinput' | 'audioinput';
+}
+
 export interface CameraSettings {
   facingMode: 'user' | 'environment';
   resolution: '4K' | '1080P' | '720P';
@@ -96,6 +104,11 @@ export interface CameraSettings {
   micEnabled: boolean;
   flashEnabled: boolean;
   recordingMode?: 'overlay' | 'direct'; // 'overlay' embeds keyboard & chord into video, 'direct' records raw camera stream for 0% CPU lag
+  aspectRatio?: '9:16' | '16:9' | 'auto'; // '9:16' vertical (Reels/TikTok/Shorts), '16:9' widescreen, or 'auto'
+  selectedVideoDeviceId?: string; // specific camera device ID
+  selectedAudioDeviceId?: string; // specific microphone device ID
+  audioRecordSource?: 'keyboard-only' | 'keyboard-and-mic'; // record keyboard only or keyboard + microphone
+  micGainLevel?: number; // 0.0 to 2.0 (default 1.0)
 }
 
 export type WifiSyncMode = 'idle' | 'host' | 'client';

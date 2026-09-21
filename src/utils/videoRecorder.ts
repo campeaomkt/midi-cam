@@ -1,4 +1,6 @@
-import { VideoRecording } from '../types';
+import { VideoRecording, KeyboardSettings } from '../types';
+import { generateKeyboardLayout, KeyData } from '../components/VirtualKeyboard';
+import { getEffectiveActiveColor, getDarkerShade, getLighterShade } from './keyboardColor';
 
 interface CachedKeyGeom {
   midi: number;
@@ -16,6 +18,11 @@ export interface StartRecordingOptions {
   getNotes?: () => number[];
   audioTracks?: MediaStreamTrack[];
   recordingMode?: 'overlay' | 'direct';
+  aspectRatio?: '9:16' | '16:9' | 'auto';
+  keyboardSettings?: KeyboardSettings;
+  chordColor?: string;
+  chordFontSize?: 'medium' | 'large' | 'huge';
+  chordPlacement?: 'above' | 'below';
 }
 
 export class VideoRecorderManager {
@@ -61,6 +68,11 @@ export class VideoRecorderManager {
     let audioTracks: MediaStreamTrack[] = [];
 
     let recordingMode: 'overlay' | 'direct' = 'overlay';
+    let aspectRatio: '9:16' | '16:9' | 'auto' = '9:16';
+    let keyboardSettings: KeyboardSettings | undefined;
+    let chordColor: string = '#ffffff';
+    let chordFontSize: 'medium' | 'large' | 'huge' = 'large';
+    let chordPlacement: 'above' | 'below' = 'above';
 
     if (optionsOrElement && 'videoElement' in optionsOrElement) {
       const opts = optionsOrElement as StartRecordingOptions;
@@ -68,6 +80,12 @@ export class VideoRecorderManager {
       filterString = opts.filterString || 'none';
       keyboardElement = opts.keyboardElement || null;
       recordingMode = opts.recordingMode || 'overlay';
+      aspectRatio = opts.aspectRatio || '9:16';
+      keyboardSettings = opts.keyboardSettings;
+      if (opts.chordColor) chordColor = opts.chordColor;
+      if (opts.chordFontSize) chordFontSize = opts.chordFontSize;
+      if (opts.chordPlacement) chordPlacement = opts.chordPlacement;
+      else if (opts.keyboardSettings?.chordPlacement) chordPlacement = opts.keyboardSettings.chordPlacement;
       if (opts.getChord) getChord = opts.getChord;
       if (opts.getNotes) getNotes = opts.getNotes;
       if (opts.audioTracks) audioTracks = opts.audioTracks;
@@ -107,21 +125,66 @@ export class VideoRecorderManager {
         (/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase()) ||
           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
-      // Optimal 720p HD resolution: ensures rock-solid 30 FPS hardware encoding on Android tablets
+      // Sensor native dimensions
       const rawW = videoElement.videoWidth || 1280;
       const rawH = videoElement.videoHeight || 720;
-      const MAX_DIM = 1280;
 
       let width = rawW;
       let height = rawH;
+      let srcX = 0;
+      let srcY = 0;
+      let srcW = rawW;
+      let srcH = rawH;
 
-      if (Math.max(width, height) > MAX_DIM) {
-        const scale = MAX_DIM / Math.max(width, height);
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
+      if (aspectRatio === '9:16') {
+        // Enforce 9:16 vertical recording (essential for PC webcams and Reels/Shorts)
+        height = 1280;
+        width = 720;
+        const targetRatio = 9 / 16;
+        const currentRatio = rawW / rawH;
+
+        if (currentRatio > targetRatio) {
+          // Camera is wider (e.g. 16:9 on PC). Center crop horizontally:
+          srcH = rawH;
+          srcW = Math.round(srcH * targetRatio);
+          srcX = Math.round((rawW - srcW) / 2);
+          srcY = 0;
+        } else {
+          // Camera is taller. Center crop vertically:
+          srcW = rawW;
+          srcH = Math.round(srcW / targetRatio);
+          srcX = 0;
+          srcY = Math.round((rawH - srcH) / 2);
+        }
+      } else if (aspectRatio === '16:9') {
+        // Enforce 16:9 horizontal recording
+        width = 1280;
+        height = 720;
+        const targetRatio = 16 / 9;
+        const currentRatio = rawW / rawH;
+
+        if (currentRatio > targetRatio) {
+          srcH = rawH;
+          srcW = Math.round(srcH * targetRatio);
+          srcX = Math.round((rawW - srcW) / 2);
+          srcY = 0;
+        } else {
+          srcW = rawW;
+          srcH = Math.round(srcW / targetRatio);
+          srcX = 0;
+          srcY = Math.round((rawH - srcH) / 2);
+        }
+      } else {
+        // Auto: scale while maintaining native aspect ratio
+        const MAX_DIM = 1280;
+        if (Math.max(width, height) > MAX_DIM) {
+          const scale = MAX_DIM / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
       }
 
-      // Android hardware encoders (MediaCodec) strictly require dimensions divisible by 4
+      // Hardware encoders strictly require dimensions divisible by 4
       width = Math.floor(width / 4) * 4;
       height = Math.floor(height / 4) * 4;
 
@@ -136,93 +199,102 @@ export class VideoRecorderManager {
 
       this.compositeCanvas = canvas;
 
-      // Precompute keyboard geometry once - ZERO DOM queries inside animation loop!
-      let cachedWhiteKeys: CachedKeyGeom[] = [];
-      let cachedBlackKeys: CachedKeyGeom[] = [];
-      let activeColor = '#3bf5b0';
-      let activeDarkColor = '#20d778';
+      // Precompute keyboard configuration and geometry once - ZERO DOM queries inside animation loop!
+      const keyCount = keyboardSettings?.keyCount || 37;
+      const octaveShift = keyboardSettings?.octaveShift || 0;
+      const visualModel = keyboardSettings?.visualModel || 'realistic-3d';
+      const theme = keyboardSettings?.theme || 'cyan';
+      const customColor = keyboardSettings?.customColor;
+      const showNoteNames = keyboardSettings?.showNoteNames || false;
+
+      const { whiteKeys, blackKeys, totalWhiteKeys } = generateKeyboardLayout(keyCount, octaveShift);
+      const effectiveColor = getEffectiveActiveColor(theme, customColor);
+      const lighterColor = getLighterShade(effectiveColor, 18);
+      const darkerColor = getDarkerShade(effectiveColor, 22);
+      const deepDarkColor = getDarkerShade(effectiveColor, 38);
+
       let kbX = 0;
       let kbY = 0;
       let kbWidth = 0;
       let kbHeight = 0;
 
-      if (keyboardElement) {
-        activeColor = keyboardElement.getAttribute('data-active-color') || '#3bf5b0';
-        activeDarkColor = keyboardElement.getAttribute('data-active-dark-color') || '#20d778';
-
-        const whiteKeyButtons = Array.from(
-          keyboardElement.querySelectorAll<HTMLElement>('[id^="piano-key-white-"]')
-        );
-        const blackKeyButtons = Array.from(
-          keyboardElement.querySelectorAll<HTMLElement>('[id^="piano-key-black-"]')
-        );
-
-        if (whiteKeyButtons.length > 0) {
-          // Precise relative positioning based on camera viewport
-          const viewport = document.getElementById('camera-viewport-container') || videoElement.parentElement;
-          if (viewport) {
-            const vRect = viewport.getBoundingClientRect();
-            const kRect = keyboardElement.getBoundingClientRect();
-            if (vRect.width > 0 && vRect.height > 0 && kRect.width > 0) {
-              kbWidth = (kRect.width / vRect.width) * width;
-              kbHeight = (kRect.height / vRect.height) * height;
-              kbX = ((kRect.left - vRect.left) / vRect.width) * width;
-              kbY = ((kRect.top - vRect.top) / vRect.height) * height;
-            }
-          }
-
-          if (kbWidth <= 0 || kbHeight <= 0) {
-            const kbRect = keyboardElement.getBoundingClientRect();
-            const actualAspect =
-              kbRect.width > 0 && kbRect.height > 0
-                ? kbRect.width / kbRect.height
-                : whiteKeyButtons.length >= 35
-                ? 7.6
-                : whiteKeyButtons.length >= 25
-                ? 6.2
-                : 4.8;
-            kbWidth = width * 0.92;
-            kbHeight = kbWidth / actualAspect;
-            kbX = (width - kbWidth) / 2;
-            kbY = height * 0.28;
-          }
-
-          const numWhites = whiteKeyButtons.length;
-          const keyW = kbWidth / numWhites;
-
-          cachedWhiteKeys = whiteKeyButtons.map((btn, idx) => {
-            const midi = parseInt(btn.id.replace('piano-key-white-', ''), 10) || 60;
-            return {
-              midi,
-              x: kbX + idx * keyW,
-              y: kbY,
-              w: keyW,
-              h: kbHeight,
-            };
-          });
-
-          cachedBlackKeys = blackKeyButtons.map((btn) => {
-            const midi = parseInt(btn.id.replace('piano-key-black-', ''), 10) || 61;
-            const styleLeft = parseFloat(btn.style.left) || 0;
-            const styleW = parseFloat(btn.style.width) || (keyW / kbWidth) * 60;
-            const bW = (styleW / 100) * kbWidth;
-            const bX = kbX + (styleLeft / 100) * kbWidth - bW / 2;
-            const bH = kbHeight * 0.62;
-            return {
-              midi,
-              x: bX,
-              y: kbY,
-              w: bW,
-              h: bH,
-            };
-          });
+      const viewport = document.getElementById('camera-viewport-container') || videoElement.parentElement;
+      if (viewport && keyboardElement) {
+        const vRect = viewport.getBoundingClientRect();
+        const kRect = keyboardElement.getBoundingClientRect();
+        if (vRect.width > 0 && vRect.height > 0 && kRect.width > 0) {
+          kbWidth = (kRect.width / vRect.width) * width;
+          kbHeight = (kRect.height / vRect.height) * height;
+          kbX = ((kRect.left - vRect.left) / vRect.width) * width;
+          kbY = ((kRect.top - vRect.top) / vRect.height) * height;
         }
       }
 
-      // Pre-calculate chord typography
-      const chordFontSize = Math.max(16, Math.round(width * 0.065));
-      const chordFont = `800 ${chordFontSize}px Outfit, -apple-system, sans-serif`;
-      const chordY = kbY > 0 ? Math.max(chordFontSize + 12, kbY - chordFontSize * 0.75) : height * 0.22;
+      if (kbWidth <= 0 || kbHeight <= 0) {
+        kbWidth = width * 0.94;
+        kbX = (width - kbWidth) / 2;
+        const customY = keyboardSettings?.customYPercent ?? 20;
+        kbY = height * (customY / 100);
+        kbHeight = visualModel === 'realistic-3d' ? kbWidth / (1200 / 280) : kbWidth / 5.2;
+      }
+
+      // Enforce proper aspect ratio for 3D model
+      if (visualModel === 'realistic-3d') {
+        const desiredHeight = kbWidth / (1200 / 280);
+        kbHeight = desiredHeight;
+      }
+
+      // Pre-calculate chord typography and vertical placement
+      const is916 = (aspectRatio || '9:16') === '9:16';
+      const fontMultiplier = is916
+        ? (chordFontSize === 'huge' ? 0.052 : chordFontSize === 'large' ? 0.042 : 0.034)
+        : (chordFontSize === 'huge' ? 0.088 : chordFontSize === 'large' ? 0.074 : 0.06);
+      const chordFontSizePx = Math.max(16, Math.round(width * fontMultiplier));
+      const chordFont = `800 ${chordFontSizePx}px Outfit, -apple-system, sans-serif`;
+
+      let chordY = 0;
+      if (chordPlacement === 'below') {
+        chordY = kbY + kbHeight + chordFontSizePx * 0.95;
+      } else {
+        chordY = Math.max(chordFontSizePx + 12, kbY - chordFontSizePx * 0.75);
+      }
+
+      // Isometric 3D Projection parameters matching Isometric3DKeyboard.tsx
+      const svgW = 1200;
+      const svgH = 280;
+      const cx = svgW / 2;
+      const frontLeft = 18;
+      const frontRight = svgW - 18;
+      const frontW = frontRight - frontLeft;
+      const yTop = 20;
+      const yFront = 216;
+      const yBottom = 268;
+      const backRatio = 0.932;
+      const scaleX = kbWidth / svgW;
+      const scaleY = kbHeight / svgH;
+
+      const projectXb = (xf: number) => cx + (xf - cx) * backRatio;
+      const pt = (sx: number, sy: number) => ({
+        x: kbX + sx * scaleX,
+        y: kbY + sy * scaleY,
+      });
+
+      const drawPoly = (points: { x: number; y: number }[], fill: string, stroke?: string, strokeW = 1) => {
+        if (points.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        if (stroke) {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = strokeW;
+          ctx.stroke();
+        }
+      };
 
       // Strict 30 FPS Frame Throttling:
       const TARGET_FPS = 30;
@@ -241,97 +313,303 @@ export class VideoRecorderManager {
         }
         lastDrawTime = now;
 
-        // 1. Draw camera video with direct GPU acceleration
+        // 1. Draw camera video with direct GPU acceleration and aspect-ratio cropping
         const isMirrored = videoElement.classList.contains('scale-x-[-1]') || (videoElement.style.transform && videoElement.style.transform.includes('scaleX(-1)'));
         if (isMirrored) {
           ctx.save();
           ctx.translate(width, 0);
           ctx.scale(-1, 1);
-          ctx.drawImage(videoElement, 0, 0, width, height);
+          ctx.drawImage(videoElement, srcX, srcY, srcW, srcH, 0, 0, width, height);
           ctx.restore();
         } else {
-          ctx.drawImage(videoElement, 0, 0, width, height);
+          ctx.drawImage(videoElement, srcX, srcY, srcW, srcH, 0, 0, width, height);
         }
 
-        // 2. Draw live chord banner if chord exists
+        // 2. Draw live chord matching on-screen color, font, and placement
         const currentChord = getChord();
         if (currentChord) {
           ctx.save();
           ctx.font = chordFont;
-          const textMetrics = ctx.measureText(currentChord);
-          const pillPaddingX = 20;
-          const pillW = textMetrics.width + pillPaddingX * 2;
-          const pillH = chordFontSize * 1.35;
-          const pillX = (width - pillW) / 2;
-          const pillY = chordY - pillH / 2;
-
-          // Translucent dark badge for high readability
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-          if (typeof ctx.roundRect === 'function') {
-            ctx.beginPath();
-            ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
-            ctx.fill();
-          } else {
-            ctx.fillRect(pillX, pillY, pillW, pillH);
-          }
-
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#fbbf24'; // Amber 400
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+          ctx.shadowBlur = Math.round(chordFontSizePx * 0.35);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 2;
+          ctx.fillStyle = chordColor || '#ffffff';
           ctx.fillText(currentChord, width / 2, chordY);
           ctx.restore();
         }
 
-        // 3. Draw piano keyboard overlay from pre-calculated geometry & active notes
-        if (cachedWhiteKeys.length > 0) {
-          const activeNotes = getNotes();
-          const hasNotes = activeNotes && activeNotes.length > 0;
+        // 3. Draw piano keyboard overlay matching selected visual model
+        const activeNotes = getNotes() || [];
+        const activeSet = new Set(activeNotes);
 
-          // Keyboard background base
+        if (visualModel === 'realistic-3d') {
+          // Render 3D Isometric White Keys
+          for (let i = 0; i < whiteKeys.length; i++) {
+            const key = whiteKeys[i];
+            const isActive = activeSet.has(key.midi);
+            const xf0 = frontLeft + (i / totalWhiteKeys) * frontW;
+            const xf1 = frontLeft + ((i + 1) / totalWhiteKeys) * frontW;
+            const xb0 = projectXb(xf0);
+            const xb1 = projectXb(xf1);
+
+            const frontFaceHeight = yBottom - yFront;
+            const ySink = isActive ? frontFaceHeight * 0.5 : 0;
+
+            // Outer left side face for key 0
+            if (i === 0) {
+              drawPoly(
+                [
+                  pt(xb0, yTop),
+                  pt(xf0, yFront + ySink),
+                  pt(xf0, yBottom),
+                  pt(xb0, yTop + frontFaceHeight),
+                ],
+                isActive ? darkerColor : '#7b7e87',
+                '#1c1c1f',
+                1
+              );
+            }
+            // Outer right side face for last key
+            if (i === totalWhiteKeys - 1) {
+              drawPoly(
+                [
+                  pt(xb1, yTop),
+                  pt(xf1, yFront + ySink),
+                  pt(xf1, yBottom),
+                  pt(xb1, yTop + frontFaceHeight),
+                ],
+                isActive ? darkerColor : '#7b7e87',
+                '#1c1c1f',
+                1
+              );
+            }
+
+            // Top Face (slanted perspective)
+            drawPoly(
+              [
+                pt(xb0, yTop),
+                pt(xb1, yTop),
+                pt(xf1, yFront + ySink),
+                pt(xf0, yFront + ySink),
+              ],
+              isActive ? lighterColor : '#ffffff',
+              '#1c1c1f',
+              1
+            );
+
+            // Front Face (depressed when active)
+            drawPoly(
+              [
+                pt(xf0, yFront + ySink),
+                pt(xf1, yFront + ySink),
+                pt(xf1, yBottom),
+                pt(xf0, yBottom),
+              ],
+              isActive ? darkerColor : '#8f929b',
+              '#1c1c1f',
+              1
+            );
+
+            // Note name if enabled
+            if (showNoteNames) {
+              const lbl = key.pitchClass === 0 || key.whiteIndex === 0
+                ? `${key.name}${key.octave}`
+                : key.name;
+              ctx.save();
+              ctx.font = `bold ${Math.max(8, Math.round(11 * scaleY))}px system-ui, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillStyle = isActive ? '#09090b' : '#71717a';
+              const mid = pt((xf0 + xf1) / 2, yFront + ySink - 8);
+              ctx.fillText(lbl, mid.x, mid.y);
+              ctx.restore();
+            }
+          }
+
+          // Render 3D Isometric Black Keys
+          for (let b = 0; b < blackKeys.length; b++) {
+            const key = blackKeys[b];
+            const isActive = activeSet.has(key.midi);
+            const seamXf = frontLeft + (key.whiteIndex / totalWhiteKeys) * frontW;
+            const seamXb = projectXb(seamXf);
+
+            const tFront = 0.61;
+            const baseY_top = yTop;
+            const baseX_top = seamXb;
+            const baseY_front = yTop + tFront * (yFront - yTop);
+            const baseX_front = seamXb + tFront * (seamXf - seamXb);
+
+            const wWhiteFront = frontW / totalWhiteKeys;
+            const wWhiteBack = (frontW * backRatio) / totalWhiteKeys;
+            const hwFront = (wWhiteFront * 0.63) / 2;
+            const hwBack = (wWhiteBack * 0.63) / 2;
+
+            const b_tl = { x: baseX_top - hwBack, y: baseY_top };
+            const b_tr = { x: baseX_top + hwBack, y: baseY_top };
+            const b_fr = { x: baseX_front + hwFront, y: baseY_front };
+            const b_fl = { x: baseX_front - hwFront, y: baseY_front };
+
+            const elev = isActive ? 5 : 14;
+            const t_tl = { x: b_tl.x, y: yTop };
+            const t_tr = { x: b_tr.x, y: yTop };
+            const t_fr = { x: b_fr.x, y: b_fr.y - elev };
+            const t_fl = { x: b_fl.x, y: b_fl.y - elev };
+
+            const dx = baseX_front - cx;
+            const isLeft = dx < -12;
+            const isRight = dx > 12;
+
+            // Shadow
+            const shadowDx = dx * 0.012;
+            drawPoly(
+              [
+                pt(b_fl.x, b_fl.y),
+                pt(b_fr.x, b_fr.y),
+                pt(b_fr.x + shadowDx, b_fr.y + 6),
+                pt(b_fl.x + shadowDx, b_fl.y + 6),
+              ],
+              'rgba(0, 0, 0, 0.45)'
+            );
+
+            // Side faces
+            if (isLeft) {
+              drawPoly(
+                [
+                  pt(t_tr.x, t_tr.y),
+                  pt(t_fr.x, t_fr.y),
+                  pt(b_fr.x, b_fr.y),
+                  pt(b_tr.x, b_tr.y),
+                ],
+                isActive ? darkerColor : '#1b1c20',
+                '#121316',
+                0.75
+              );
+            }
+            if (isRight) {
+              drawPoly(
+                [
+                  pt(t_tl.x, t_tl.y),
+                  pt(t_fl.x, t_fl.y),
+                  pt(b_fl.x, b_fl.y),
+                  pt(b_tl.x, b_tl.y),
+                ],
+                isActive ? darkerColor : '#1b1c20',
+                '#121316',
+                0.75
+              );
+            }
+
+            // Front face
+            drawPoly(
+              [
+                pt(t_fl.x, t_fl.y),
+                pt(t_fr.x, t_fr.y),
+                pt(b_fr.x, b_fr.y),
+                pt(b_fl.x, b_fl.y),
+              ],
+              isActive ? deepDarkColor : '#0c0d10',
+              '#121316',
+              0.75
+            );
+
+            // Top face
+            drawPoly(
+              [
+                pt(t_tl.x, t_tl.y),
+                pt(t_tr.x, t_tr.y),
+                pt(t_fr.x, t_fr.y),
+                pt(t_fl.x, t_fl.y),
+              ],
+              isActive ? effectiveColor : '#25262a',
+              '#141416',
+              0.75
+            );
+
+            if (showNoteNames) {
+              ctx.save();
+              ctx.font = `bold ${Math.max(7, Math.round(9 * scaleY))}px system-ui, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = isActive ? '#09090b' : '#a1a1aa';
+              const mid = pt((t_fl.x + t_fr.x) / 2, (t_tl.y + t_fr.y) / 2);
+              ctx.fillText(key.name, mid.x, mid.y);
+              ctx.restore();
+            }
+          }
+        } else {
+          // Acoustic / Flat keyboard rendering
+          const keyW = kbWidth / totalWhiteKeys;
+
+          // Background base
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(kbX, kbY, kbWidth, kbHeight);
 
-          // Render White Keys
-          for (let i = 0; i < cachedWhiteKeys.length; i++) {
-            const key = cachedWhiteKeys[i];
-            const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
+          // Red felt bar for acoustic model
+          if (visualModel === 'realistic-acoustic') {
+            ctx.fillStyle = '#991b1b';
+            ctx.fillRect(kbX, kbY, kbWidth, Math.max(3, kbHeight * 0.04));
+          }
+
+          // White keys
+          for (let i = 0; i < whiteKeys.length; i++) {
+            const key = whiteKeys[i];
+            const isKeyActive = activeSet.has(key.midi);
+            const kx = kbX + i * keyW;
 
             if (isKeyActive) {
-              ctx.save();
-              ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 10;
-              ctx.fillStyle = activeColor;
-              ctx.fillRect(key.x, key.y, key.w, key.h);
-              ctx.restore();
+              ctx.fillStyle = effectiveColor;
+              ctx.fillRect(kx, kbY, keyW, kbHeight);
             } else {
               ctx.fillStyle = '#ffffff';
-              ctx.fillRect(key.x, key.y, key.w, key.h);
+              ctx.fillRect(kx, kbY, keyW, kbHeight);
             }
 
-            // Key divider line
             ctx.strokeStyle = '#d1d5db';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(key.x + key.w, key.y);
-            ctx.lineTo(key.x + key.w, key.y + key.h);
+            ctx.moveTo(kx + keyW, kbY);
+            ctx.lineTo(kx + keyW, kbY + kbHeight);
             ctx.stroke();
+
+            if (showNoteNames) {
+              ctx.save();
+              ctx.font = `bold 11px system-ui, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillStyle = isKeyActive ? '#09090b' : '#71717a';
+              ctx.fillText(key.name, kx + keyW / 2, kbY + kbHeight - 6);
+              ctx.restore();
+            }
           }
 
-          // Render Black Keys
-          for (let i = 0; i < cachedBlackKeys.length; i++) {
-            const key = cachedBlackKeys[i];
-            const isKeyActive = hasNotes && activeNotes.indexOf(key.midi) !== -1;
+          // Black keys
+          const bW = keyW * 0.63;
+          const bH = kbHeight * 0.62;
+          for (let b = 0; b < blackKeys.length; b++) {
+            const key = blackKeys[b];
+            const isKeyActive = activeSet.has(key.midi);
+            const seamX = kbX + (key.whiteIndex / totalWhiteKeys) * kbWidth;
+            const bx = seamX - bW / 2;
 
             if (isKeyActive) {
-              ctx.save();
-              ctx.shadowColor = activeColor;
-              ctx.shadowBlur = 8;
-              ctx.fillStyle = activeDarkColor;
-              ctx.fillRect(key.x, key.y, key.w, key.h);
-              ctx.restore();
+              ctx.fillStyle = darkerColor;
+              ctx.fillRect(bx, kbY, bW, bH);
             } else {
               ctx.fillStyle = '#18181b';
-              ctx.fillRect(key.x, key.y, key.w, key.h);
+              ctx.fillRect(bx, kbY, bW, bH);
+            }
+
+            if (showNoteNames) {
+              ctx.save();
+              ctx.font = `bold 9px system-ui, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = isKeyActive ? '#09090b' : '#a1a1aa';
+              ctx.fillText(key.name, bx + bW / 2, kbY + bH / 2);
+              ctx.restore();
             }
           }
         }
@@ -339,7 +617,8 @@ export class VideoRecorderManager {
 
       // Determine video track source:
       let videoTracksToRecord: MediaStreamTrack[] = [];
-      const isDirectMode = recordingMode === 'direct' && videoElement.srcObject instanceof MediaStream;
+      const needsAspectCrop = (aspectRatio === '9:16' && rawW > rawH) || (aspectRatio === '16:9' && rawW < rawH);
+      const isDirectMode = recordingMode === 'direct' && !needsAspectCrop && videoElement.srcObject instanceof MediaStream;
 
       if (isDirectMode) {
         const rawStream = videoElement.srcObject as MediaStream;

@@ -32,8 +32,12 @@ import { sf2Engine } from './utils/sf2Engine';
 import { loadSoundFontFromStorage } from './utils/sf2Storage';
 import { timbreEngine } from './utils/timbreEngine';
 import { wifiMidiBridge } from './utils/wifiMidiBridge';
+import { useMediaDevices } from './hooks/useMediaDevices';
 
 export default function App() {
+  const { cameras, microphones, refreshDevices } = useMediaDevices();
+  const recordingAudioCleanupRef = useRef<(() => void) | null>(null);
+
   // Camera Configuration State
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>({
     facingMode: 'environment',
@@ -44,6 +48,9 @@ export default function App() {
     micEnabled: true,
     flashEnabled: false,
     recordingMode: 'overlay', // Default to Overlay so keyboard, animated keys and chords are burned into the recorded video
+    aspectRatio: '9:16', // Default 9:16 vertical ratio for Reels/TikTok/Shorts
+    audioRecordSource: 'keyboard-and-mic', // Default to Keyboard + Mic so voice is recorded seamlessly when mic is active
+    micGainLevel: 1.0,
   });
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
@@ -318,11 +325,15 @@ export default function App() {
   };
 
   // Video Recording Lifecycle
-  const handleToggleRecording = () => {
+  const handleToggleRecording = async () => {
     if (isRecording) {
       videoRecorder.stopRecording();
       setIsRecording(false);
       setRecordingSeconds(0);
+      if (recordingAudioCleanupRef.current) {
+        recordingAudioCleanupRef.current();
+        recordingAudioCleanupRef.current = null;
+      }
     } else {
       if (!videoRef.current) return;
 
@@ -335,18 +346,60 @@ export default function App() {
         audioCtx.resume();
       }
 
-      // Audio tracks from Synth & Mic
-      const audioTracks: MediaStreamTrack[] = [];
-      const synthDest = audioSynth.getAudioStreamDestination();
-      if (synthDest && synthDest.stream.getAudioTracks().length > 0) {
-        audioTracks.push(synthDest.stream.getAudioTracks()[0]);
+      // Audio setup: Check if microphone should be recorded
+      // When micEnabled is true (top HUD mic is active) and audioRecordSource is not keyboard-only
+      const shouldRecordMic = cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only';
+
+      let micStream: MediaStream | null = null;
+      if (shouldRecordMic) {
+        try {
+          // Attempt high-fidelity musical audio capture with echoCancellation: false
+          // so browser AEC does not chop/duck/garble voice when piano notes play out of speakers
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: cameraSettings.selectedAudioDeviceId
+              ? {
+                  deviceId: { exact: cameraSettings.selectedAudioDeviceId },
+                  echoCancellation: false,
+                  autoGainControl: false,
+                }
+              : {
+                  echoCancellation: false,
+                  autoGainControl: false,
+                },
+          });
+        } catch (aecErr) {
+          console.warn('Tentativa com restrições musicais falhou, tentando padrão com deviceId...', aecErr);
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({
+              audio: cameraSettings.selectedAudioDeviceId
+                ? { deviceId: { exact: cameraSettings.selectedAudioDeviceId } }
+                : true,
+            });
+          } catch (devErr) {
+            try {
+              micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (fallbackErr) {
+              console.warn('Microfone indisponível para gravação:', fallbackErr);
+            }
+          }
+        }
       }
+
+      const micGain = cameraSettings.micGainLevel !== undefined ? cameraSettings.micGainLevel : 1.0;
+      const { stream: recAudioStream, cleanup: audioCleanup } = audioSynth.getRecordingAudioStream(micStream, micGain);
+      recordingAudioCleanupRef.current = audioCleanup;
+
+      const audioTracks = recAudioStream.getAudioTracks();
 
       videoRecorder.setTimeUpdateListener((secs) => {
         setRecordingSeconds(secs);
       });
 
       videoRecorder.setCompletionListener(async (newRec) => {
+        if (recordingAudioCleanupRef.current) {
+          recordingAudioCleanupRef.current();
+          recordingAudioCleanupRef.current = null;
+        }
         setRecordings((prev) => [newRec, ...prev]);
         await saveRecordingToStorage(newRec);
         setIsGalleryOpen(true);
@@ -360,10 +413,20 @@ export default function App() {
         getNotes: () => activeNotesRef.current,
         audioTracks,
         recordingMode: cameraSettings.recordingMode || 'overlay',
+        aspectRatio: cameraSettings.aspectRatio || '9:16',
+        keyboardSettings,
+        chordColor,
+        chordFontSize,
+        chordPlacement: keyboardSettings.chordPlacement || 'above',
       });
 
       if (started) {
         setIsRecording(true);
+      } else {
+        if (recordingAudioCleanupRef.current) {
+          recordingAudioCleanupRef.current();
+          recordingAudioCleanupRef.current = null;
+        }
       }
     }
   };
@@ -524,6 +587,9 @@ export default function App() {
         isMidiConnected={isMidiConnected}
         activeSoundFontName={activeSoundFontName}
         wifiSyncStatus={wifiSyncStatus}
+        cameras={cameras}
+        microphones={microphones}
+        onRefreshDevices={refreshDevices}
         onOpenWifiSync={() => {
           setIsSettingsOpen(false);
           setIsWifiSyncOpen(true);

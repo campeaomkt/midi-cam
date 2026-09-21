@@ -83,6 +83,23 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
             <span className="font-extrabold text-sm md:text-base">{cameraSettings.fps}</span>
             <span className="text-[10px] md:text-xs text-zinc-400 font-medium">FPS</span>
           </button>
+
+          {/* Aspect Ratio Toggle: 9:16 (Vertical Reels/Shorts) vs 16:9 (Horizontal) */}
+          <button
+            type="button"
+            id="btn-toggle-aspect-ratio"
+            onClick={() => {
+              const nextRatio = (cameraSettings.aspectRatio || '9:16') === '9:16' ? '16:9' : '9:16';
+              onUpdateCamera({ aspectRatio: nextRatio });
+            }}
+            className="flex items-baseline gap-0.5 hover:text-white transition cursor-pointer"
+            title="Alternar formato: 9:16 (Vertical Reels/TikTok) ou 16:9 (Horizontal)"
+          >
+            <span className="font-extrabold text-sm md:text-base text-amber-400">
+              {cameraSettings.aspectRatio || '9:16'}
+            </span>
+            <span className="text-[10px] md:text-xs text-zinc-400 font-medium">RATIO</span>
+          </button>
         </div>
 
         {/* Right: Flash, Mic, Grid, Settings Icons */}
@@ -104,11 +121,17 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
           <button
             type="button"
             id="btn-toggle-mic"
-            onClick={() => onUpdateCamera({ micEnabled: !cameraSettings.micEnabled })}
+            onClick={() => {
+              const nextState = !cameraSettings.micEnabled;
+              onUpdateCamera({
+                micEnabled: nextState,
+                audioRecordSource: nextState ? 'keyboard-and-mic' : 'keyboard-only',
+              });
+            }}
             className={`p-1.5 md:p-2 rounded-full transition active:scale-90 cursor-pointer ${
               cameraSettings.micEnabled ? 'text-white' : 'text-rose-400 bg-rose-400/20'
             }`}
-            title="Microfone"
+            title={cameraSettings.micEnabled ? 'Microfone Ativo (Voz + Teclado)' : 'Microfone Desativado (Apenas Teclado)'}
           >
             {cameraSettings.micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
           </button>

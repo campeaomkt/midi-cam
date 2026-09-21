@@ -7,23 +7,35 @@ interface ChordDisplayProps {
   showNotesBreakdown?: boolean;
   fontSize?: 'medium' | 'large' | 'huge';
   color?: string;
+  aspectRatio?: '9:16' | '16:9' | 'auto';
 }
 
 export const ChordDisplay: React.FC<ChordDisplayProps> = ({
   chord,
   fontSize = 'large',
   color = '#ffffff',
+  aspectRatio = '9:16',
 }) => {
   // Only display the chord when keys are actively pressed
   if (!chord) {
     return null;
   }
 
-  const fontSizeClasses = {
-    medium: 'text-2xl sm:text-[28px] md:text-[34px] lg:text-[42px]',
-    large: 'text-[29px] sm:text-[36px] md:text-[46px] lg:text-[58px]',
-    huge: 'text-4xl sm:text-[44px] md:text-[58px] lg:text-[72px]',
-  };
+  const isAspect916 = (aspectRatio || '9:16') === '9:16';
+
+  // In 9:16 mode (standard vertical format for PC & mobile), keep the chord elegant
+  // and proportionate to the narrow vertical frame, preventing giant oversized text on PC desktop.
+  const fontSizeClasses = isAspect916
+    ? {
+        medium: 'text-xl sm:text-2xl',
+        large: 'text-2xl sm:text-[28px]',
+        huge: 'text-[28px] sm:text-[34px]',
+      }
+    : {
+        medium: 'text-2xl sm:text-[28px] md:text-[34px] lg:text-[42px]',
+        large: 'text-[29px] sm:text-[36px] md:text-[46px] lg:text-[58px]',
+        huge: 'text-4xl sm:text-[44px] md:text-[58px] lg:text-[72px]',
+      };
 
   return (
     <div

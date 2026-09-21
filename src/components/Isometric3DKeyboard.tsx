@@ -96,8 +96,8 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
     >
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full h-full select-none touch-none filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.55)]"
-        preserveAspectRatio="none"
+        className="w-full h-auto max-h-full select-none touch-none filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.55)]"
+        preserveAspectRatio="xMidYMid meet"
       >
         <defs>
           <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">

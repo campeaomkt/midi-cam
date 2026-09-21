@@ -58,23 +58,35 @@ export const TypographyPositionModal: React.FC<TypographyPositionModalProps> = (
 
         {/* Position Selector */}
         <div className="flex flex-col gap-2">
-          <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-            Posição na Tela
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+              Posição na Tela
+            </label>
+            {keyboardSettings.customYPercent !== undefined && (
+              <span className="text-[11px] text-amber-400 font-mono font-bold">
+                Livre ({Math.round(keyboardSettings.customYPercent)}%)
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { id: 'top', label: 'Topo' },
-              { id: 'upper-third', label: 'Superior (Exemplo)' },
-              { id: 'middle', label: 'Centro' },
-              { id: 'lower-third', label: 'Inferior' },
-              { id: 'bottom', label: 'Rodapé' },
+              { id: 'top', label: 'Topo', pct: 12 },
+              { id: 'upper-third', label: 'Superior (Exemplo)', pct: 20 },
+              { id: 'middle', label: 'Centro', pct: 45 },
+              { id: 'lower-third', label: 'Inferior', pct: 65 },
+              { id: 'bottom', label: 'Rodapé', pct: 78 },
             ].map((pos) => {
               const isSelected = keyboardSettings.position === pos.id;
               return (
                 <button
                   key={pos.id}
                   type="button"
-                  onClick={() => onUpdateKeyboard({ position: pos.id as KeyboardSettings['position'] })}
+                  onClick={() =>
+                    onUpdateKeyboard({
+                      position: pos.id as KeyboardSettings['position'],
+                      customYPercent: pos.pct,
+                    })
+                  }
                   className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer ${
                     isSelected
                       ? 'bg-amber-400 text-black border-amber-300 shadow-md font-bold'
@@ -85,6 +97,52 @@ export const TypographyPositionModal: React.FC<TypographyPositionModalProps> = (
                 </button>
               );
             })}
+          </div>
+          <p className="text-[11px] text-zinc-400 flex items-center gap-1 mt-0.5">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Dica: você também pode clicar e arrastar o teclado diretamente na tela!</span>
+          </p>
+        </div>
+
+        {/* Chord Placement: Above vs Below Keyboard */}
+        <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
+          <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+            Posição da Cifra no Vídeo
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onUpdateKeyboard({ chordPlacement: 'above' })}
+              className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                (keyboardSettings.chordPlacement || 'above') === 'above'
+                  ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                  : 'bg-zinc-800/80 border-white/10 text-zinc-300 hover:bg-zinc-700'
+              }`}
+            >
+              <span className="font-extrabold">▲ Em Cima do Teclado</span>
+              <span className={`text-[10px] ${
+                (keyboardSettings.chordPlacement || 'above') === 'above' ? 'text-black/80' : 'text-zinc-400'
+              }`}>
+                Cifra flutua acima das teclas
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onUpdateKeyboard({ chordPlacement: 'below' })}
+              className={`py-2 px-3 rounded-lg text-xs font-semibold border transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                keyboardSettings.chordPlacement === 'below'
+                  ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md'
+                  : 'bg-zinc-800/80 border-white/10 text-zinc-300 hover:bg-zinc-700'
+              }`}
+            >
+              <span className="font-extrabold">▼ Em Baixo do Teclado</span>
+              <span className={`text-[10px] ${
+                keyboardSettings.chordPlacement === 'below' ? 'text-black/80' : 'text-zinc-400'
+              }`}>
+                Cifra flutua abaixo das teclas
+              </span>
+            </button>
           </div>
         </div>
 
