@@ -124,10 +124,11 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
             const xb0 = projectXb(xf0);
             const xb1 = projectXb(xf1);
 
-            // Active depression: depressed keys sink down slightly in 3D
-            const ySink = isActive ? 2.5 : 0;
+            // Active depression: depressed keys sink down to exactly half the height of the front face
+            const frontFaceHeight = yBottom - yFront;
+            const ySink = isActive ? frontFaceHeight * 0.5 : 0;
 
-            const topPoints = `${xb0},${yTop + ySink} ${xb1},${yTop + ySink} ${xf1},${yFront + ySink} ${xf0},${yFront + ySink}`;
+            const topPoints = `${xb0},${yTop} ${xb1},${yTop} ${xf1},${yFront + ySink} ${xf0},${yFront + ySink}`;
             const frontPoints = `${xf0},${yFront + ySink} ${xf1},${yFront + ySink} ${xf1},${yBottom} ${xf0},${yBottom}`;
 
             const isFirst = i === 0;
@@ -144,7 +145,7 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
                 {/* Left Outer Side Face for the first white key */}
                 {isFirst && (
                   <polygon
-                    points={`${xb0},${yTop + ySink} ${xf0},${yFront + ySink} ${xf0},${yBottom} ${xb0},${yTop + ySink + (yBottom - yFront)}`}
+                    points={`${xb0},${yTop} ${xf0},${yFront + ySink} ${xf0},${yBottom} ${xb0},${yTop + (yBottom - yFront)}`}
                     fill={isActive ? darkerColor : '#7b7e87'}
                     stroke="#1c1c1f"
                     strokeWidth="1"
@@ -154,7 +155,7 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
                 {/* Right Outer Side Face for the last white key */}
                 {isLast && (
                   <polygon
-                    points={`${xb1},${yTop + ySink} ${xf1},${yFront + ySink} ${xf1},${yBottom} ${xb1},${yTop + ySink + (yBottom - yFront)}`}
+                    points={`${xb1},${yTop} ${xf1},${yFront + ySink} ${xf1},${yBottom} ${xb1},${yTop + (yBottom - yFront)}`}
                     fill={isActive ? darkerColor : '#7b7e87'}
                     stroke="#1c1c1f"
                     strokeWidth="1"
@@ -224,10 +225,10 @@ export const Isometric3DKeyboard: React.FC<Isometric3DKeyboardProps> = ({
             const b_fr = { x: baseX_front + hwFront, y: baseY_front };
             const b_fl = { x: baseX_front - hwFront, y: baseY_front };
 
-            // 3D elevation (key height above white keys)
-            const elev = isActive ? 7 : 14;
-            const t_tl = { x: b_tl.x, y: b_tl.y - elev };
-            const t_tr = { x: b_tr.x, y: b_tr.y - elev };
+            // 3D elevation at front (key pivots from back edge at yTop, exactly matching white keys top line)
+            const elev = isActive ? 5 : 14;
+            const t_tl = { x: b_tl.x, y: yTop };
+            const t_tr = { x: b_tr.x, y: yTop };
             const t_fr = { x: b_fr.x, y: b_fr.y - elev };
             const t_fl = { x: b_fl.x, y: b_fl.y - elev };
 
