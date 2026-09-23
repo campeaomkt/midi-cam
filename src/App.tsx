@@ -215,30 +215,6 @@ export default function App() {
     keyboardSettingsRef.current = keyboardSettings;
   }, [keyboardSettings]);
 
-  // Helper to adjust MIDI velocity according to the user's velocityCurve preset
-  const applyVelocityCurve = useCallback((rawVel: number, curve?: 'natural' | 'soft' | 'hard' | 'fixed'): number => {
-    // Fixed mode: identical to the mouse click (velocity 95)
-    if (curve === 'fixed') return 95;
-
-    if (curve === 'soft') {
-      // Sensível / Mini Teclados: eleva toques muito leves para volume encorpado
-      const norm = Math.max(0.01, Math.min(1.0, rawVel / 127));
-      return Math.min(127, Math.round((0.25 + 0.75 * Math.pow(norm, 0.75)) * 127));
-    }
-
-    if (curve === 'hard') {
-      // Resposta linear direta 1:1 para teclados com teclas pesadas de martelo (Hammer Action)
-      return rawVel;
-    }
-
-    // 'natural' (Padrão Calibrado para Estúdio):
-    // Transforma toques médios no ponto de equilíbrio doce e aveludado (80-95, exatamente como o clique do mouse).
-    // Evita que toques normais disparem a camada fortissimo agressiva, preservando a acústica pura do SF2.
-    const norm = Math.max(0.01, Math.min(1.0, rawVel / 127));
-    const mapped = Math.pow(norm, 1.28) * 127;
-    return Math.max(1, Math.min(127, Math.round(mapped)));
-  }, []);
-
   // Auto-detect real physical webcam if selected is missing or currently pointing to a virtual device like Iriun or OBS
   useEffect(() => {
     if (cameras.length > 0) {
@@ -274,10 +250,9 @@ export default function App() {
   useEffect(() => {
     const unsubNoteOn = midiManager.onNoteOn((note, velocity) => {
       setActiveNotes((prev) => (prev.includes(note) ? prev : [...prev, note]));
-      const currentKbd = keyboardSettingsRef.current;
-      if (currentKbd.soundEnabled) {
-        const adjustedVel = applyVelocityCurve(velocity, currentKbd.velocityCurve || 'natural');
-        audioSynth.startNote(note, adjustedVel);
+      if (keyboardSettingsRef.current.soundEnabled) {
+        // Natural 1:1 hardware MIDI velocity straight from controller, identical to any standard DAW
+        audioSynth.startNote(note, velocity);
       }
     });
 

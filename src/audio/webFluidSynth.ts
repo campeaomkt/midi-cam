@@ -254,34 +254,20 @@ export class WebFluidSynth {
   private applyEngineDefaults() {
     if (!this.synth) return;
     try {
-      // Gain default ~0.55 (clamped [0.01, 1.5])
+      // Direct gain scaling
       this.synth.setGain(this.currentGain);
-      // Fourth-order interpolation per reference spec
+      // High-quality cubic/4th-order sample interpolation without coloring timbre
       this.synth.setInterpolation(4);
-
-      // Natural piano damper release (~450ms envelope decay)
-      // SoundFont generator 38 is GEN_VOLENVRELEASE in timecents (-1400 timecents is ~440ms)
-      (this.synth as any).setGenerator?.(0, 38, -1400);
-      (this.synth as any).setGenerator?.(0, 30, -1400); // GEN_MODENVRELEASE
-
-      // Warm acoustic room reverb for natural spatial depth
-      (this.synth as any).setReverb?.(0.35, 0.45, 0.7, 0.22);
-      (this.synth as any).setReverbOn?.(true);
+      // Disable artificial reverb so the soundfont plays 100% dry and natural, exactly as designed (standard DAW behavior)
+      (this.synth as any).setReverbOn?.(false);
     } catch (e) {
       console.warn('[FluidSynth] Error setting initial settings:', e);
     }
   }
 
-  public setReleaseTime(seconds = 0.45) {
-    if (!this.synth) return;
-    try {
-      const clampedSec = Math.max(0.05, Math.min(seconds, 3.0));
-      const timecents = Math.round(1200 * Math.log2(clampedSec));
-      (this.synth as any).setGenerator?.(0, 38, timecents);
-      (this.synth as any).setGenerator?.(0, 30, timecents);
-    } catch (e) {
-      console.warn('[FluidSynth] Error setting release time:', e);
-    }
+  public setReleaseTime(_seconds = 0.45) {
+    // No-op: Do not override SoundFont internal release envelopes.
+    // Preserve authentic soundfont sample releases and envelopes as defined in the SF2 file.
   }
 
   public async fallbackToScriptProcessor(): Promise<void> {
@@ -301,11 +287,7 @@ export class WebFluidSynth {
     fallbackSynth.init(this.ctx.sampleRate, {
       initialGain: this.currentGain,
       polyphony: 256,
-      reverbActive: true,
-      reverbRoomSize: 0.35,
-      reverbDamp: 0.45,
-      reverbWidth: 0.7,
-      reverbLevel: 0.22,
+      reverbActive: false,
     });
     const node = fallbackSynth.createAudioNode(this.ctx, 1024);
     node.connect(targetDestination);
