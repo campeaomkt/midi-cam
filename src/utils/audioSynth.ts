@@ -10,6 +10,7 @@ import { unlockAudioContext, setupAutoUnlock } from './iosAudioUnlock';
 
 class AudioSynthManager {
   private ctx: AudioContext | null = null;
+  private soundfontBus: GainNode | null = null;
   private masterGain: GainNode | null = null;
   private masterLimiter: DynamicsCompressorNode | null = null;
   private streamDestination: MediaStreamAudioDestinationNode | null = null;
@@ -28,28 +29,34 @@ class AudioSynthManager {
     if (this.ctx) return;
 
     this.ctx = getSharedAudioContext();
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
 
-    // Pure direct monitor output to speakers/headphones
+    // 1. Dedicated SoundFont Bus: Receives pure audio directly from SoundFontEngine (FluidSynth)
+    this.soundfontBus = this.ctx.createGain();
+    this.soundfontBus.gain.setValueAtTime(1.0, this.ctx.currentTime);
+
+    // 2. Master Gain for live monitoring (speakers / headphones)
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+
+    // Route soundfont bus to live speaker monitor
+    this.soundfontBus.connect(this.masterGain);
     this.masterGain.connect(this.ctx.destination);
 
-    // Gentle studio limiter ONLY for the recording stream (prevents video recording audio from clipping)
+    // 3. Gentle studio limiter for streaming monitor
     this.masterLimiter = this.ctx.createDynamicsCompressor();
     this.masterLimiter.threshold.setValueAtTime(-1.0, this.ctx.currentTime);
     this.masterLimiter.knee.setValueAtTime(6, this.ctx.currentTime);
     this.masterLimiter.ratio.setValueAtTime(4, this.ctx.currentTime);
     this.masterLimiter.attack.setValueAtTime(0.005, this.ctx.currentTime);
     this.masterLimiter.release.setValueAtTime(0.05, this.ctx.currentTime);
-
-    this.masterGain.connect(this.masterLimiter);
+    this.soundfontBus.connect(this.masterLimiter);
 
     // Create stream destination for combining with video recording
     this.streamDestination = this.ctx.createMediaStreamDestination();
     this.masterLimiter.connect(this.streamDestination);
 
-    // Initialize the FluidSynth SoundFont engine with this AudioContext and masterGain
-    SoundFontEngine.init(this.ctx, this.masterGain).catch((e) => {
+    // Initialize the FluidSynth SoundFont engine with this AudioContext and soundfontBus
+    SoundFontEngine.init(this.ctx, this.soundfontBus).catch((e) => {
       console.warn('SoundFontEngine init warning:', e);
     });
 
@@ -61,6 +68,11 @@ class AudioSynthManager {
   public getAudioContext(): AudioContext {
     this.initContext();
     return this.ctx!;
+  }
+
+  public getSoundfontBus(): GainNode {
+    this.initContext();
+    return this.soundfontBus!;
   }
 
   public getMasterGain(): GainNode {
@@ -77,14 +89,14 @@ class AudioSynthManager {
 
   /**
    * Creates a dedicated mixed MediaStream for video recording.
-   * If micStream is provided, mixes keyboard synth audio + microphone audio.
+   * Routes the digital SoundFont timbre and/or microphone into the recording destination.
    * Balanced gain staging prevents digital clipping and avoids browser ducking/distortion.
    * Microphone is routed ONLY to the recording stream, avoiding acoustic loop feedback to speakers.
    */
   public getRecordingAudioStream(
     micStream?: MediaStream | null,
-    micGainMultiplier: number = 2.5,
-    keyboardGainMultiplier: number = 0.65
+    micGainMultiplier: number = 1.0,
+    keyboardGainMultiplier: number = 0.85
   ): {
     stream: MediaStream;
     cleanup: () => void;
@@ -93,7 +105,16 @@ class AudioSynthManager {
     const ctx = this.ctx!;
     const recDest = ctx.createMediaStreamDestination();
 
-    const hasMic = Boolean(micStream && micStream.getAudioTracks().length > 0);
+    // Ensure SoundFontEngine output node is hooked to soundfontBus
+    const sfNode = SoundFontEngine.getOutputNode();
+    if (sfNode && this.soundfontBus) {
+      try {
+        sfNode.connect(this.soundfontBus);
+      } catch {}
+    }
+
+    const hasMic = Boolean(micStream && micStream.getAudioTracks().length > 0 && micGainMultiplier > 0);
+    const hasKeyboard = keyboardGainMultiplier > 0;
 
     // Studio Master Peak Limiter on the combined recording output (identical to OBS Master Limiter)
     // Threshold is set to -0.5 dB so video encoders (MP4/WebM) never receive clipped samples.
@@ -105,13 +126,17 @@ class AudioSynthManager {
     masterLimiter.release.setValueAtTime(0.04, ctx.currentTime);
     masterLimiter.connect(recDest);
 
-    // Dedicated gain for keyboard audio into the recording destination:
+    // 1. Dedicated gain for keyboard audio into the recording destination:
     // Calibrated so piano sits warmly and solidly in the mix without burying or clipping over voice
-    const keyboardRecGain = ctx.createGain();
-    const safeKeyboardGain = Math.max(0.1, Math.min(2.0, keyboardGainMultiplier));
-    keyboardRecGain.gain.setValueAtTime(safeKeyboardGain, ctx.currentTime);
-    (this.masterLimiter || this.masterGain)!.connect(keyboardRecGain);
-    keyboardRecGain.connect(masterLimiter);
+    let keyboardRecGain: GainNode | null = null;
+    if (hasKeyboard && this.soundfontBus) {
+      keyboardRecGain = ctx.createGain();
+      const safeKeyboardGain = Math.max(0.05, Math.min(2.5, keyboardGainMultiplier));
+      keyboardRecGain.gain.setValueAtTime(safeKeyboardGain, ctx.currentTime);
+
+      this.soundfontBus.connect(keyboardRecGain);
+      keyboardRecGain.connect(masterLimiter);
+    }
 
     let micSource: MediaStreamAudioSourceNode | null = null;
     let micHighPass: BiquadFilterNode | null = null;
@@ -123,21 +148,18 @@ class AudioSynthManager {
         micSource = ctx.createMediaStreamSource(micStream);
         this.activeRecordingMicSource = micSource; // keep reference to prevent GC in Chrome/Safari
 
-        // 1. High-Pass Filter at 80Hz: Removes desk rumble, keybed mechanical thumps, and room hum
+        // High-Pass Filter at 80Hz: Removes desk rumble, keybed mechanical thumps, and room hum
         micHighPass = ctx.createBiquadFilter();
         micHighPass.type = 'highpass';
         micHighPass.frequency.setValueAtTime(80, ctx.currentTime);
         micHighPass.Q.setValueAtTime(0.7, ctx.currentTime);
 
-        // 2. Studio Vocal Preamp:
-        // PC webcams and USB mics have quiet raw ADC outputs.
-        // Applies studio makeup boost so the voice is present, crisp, and prominent.
+        // Studio Vocal Preamp:
         micPreamp = ctx.createGain();
-        const safeMicMultiplier = Math.max(0.2, Math.min(6.0, micGainMultiplier));
+        const safeMicMultiplier = Math.max(0.1, Math.min(4.0, micGainMultiplier));
         micPreamp.gain.setValueAtTime(safeMicMultiplier, ctx.currentTime);
 
-        // 3. Studio Vocal Leveler / Compressor:
-        // Maintains consistent vocal presence over the piano accompaniment
+        // Studio Vocal Leveler / Compressor:
         micCompressor = ctx.createDynamicsCompressor();
         micCompressor.threshold.setValueAtTime(-18, ctx.currentTime);
         micCompressor.knee.setValueAtTime(6, ctx.currentTime);
@@ -157,13 +179,31 @@ class AudioSynthManager {
 
     const cleanup = () => {
       try {
-        (this.masterLimiter || this.masterGain)?.disconnect(keyboardRecGain);
-        keyboardRecGain.disconnect();
-        if (micSource) micSource.disconnect();
-        if (micHighPass) micHighPass.disconnect();
-        if (micPreamp) micPreamp.disconnect();
-        if (micCompressor) micCompressor.disconnect();
-        masterLimiter.disconnect();
+        if (keyboardRecGain) {
+          if (this.soundfontBus) {
+            try {
+              this.soundfontBus.disconnect(keyboardRecGain);
+            } catch {}
+          }
+          try {
+            keyboardRecGain.disconnect();
+          } catch {}
+        }
+        if (micSource) {
+          try { micSource.disconnect(); } catch {}
+        }
+        if (micHighPass) {
+          try { micHighPass.disconnect(); } catch {}
+        }
+        if (micPreamp) {
+          try { micPreamp.disconnect(); } catch {}
+        }
+        if (micCompressor) {
+          try { micCompressor.disconnect(); } catch {}
+        }
+        try {
+          masterLimiter.disconnect();
+        } catch {}
         if (this.activeRecordingMicSource === micSource) {
           this.activeRecordingMicSource = null;
         }

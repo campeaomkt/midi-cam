@@ -109,7 +109,7 @@ export interface CameraSettings {
   aspectRatio?: '9:16' | '16:9' | 'auto'; // '9:16' vertical (Reels/TikTok/Shorts), '16:9' widescreen, or 'auto'
   selectedVideoDeviceId?: string; // specific camera device ID
   selectedAudioDeviceId?: string; // specific microphone device ID
-  audioRecordSource?: 'keyboard-only' | 'keyboard-and-mic'; // record keyboard only or keyboard + microphone
+  audioRecordSource?: 'keyboard-only' | 'keyboard-and-mic' | 'mic-only'; // record keyboard only, keyboard + microphone, or mic only
   micGainLevel?: number; // 0.5 to 4.0 (studio vocal preamp boost, default 2.5)
   keyboardRecordingGainLevel?: number; // 0.2 to 1.5 (studio keyboard mix balance, default 0.65)
 }

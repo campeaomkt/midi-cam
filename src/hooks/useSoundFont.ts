@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SoundFontEngine } from '../audio/SoundFontEngine';
 import { soundFontLibrary, SoundFontCatalogEntry } from '../audio/soundFontLibrary';
+import { audioSynth } from '../utils/audioSynth';
 
 export function useSoundFont() {
   const [catalog, setCatalog] = useState<SoundFontCatalogEntry[]>([]);
@@ -34,8 +35,11 @@ export function useSoundFont() {
     const unsubEngine = SoundFontEngine.subscribe(syncState);
     const unsubLibrary = soundFontLibrary.subscribe(syncState);
 
-    // Eagerly initialize soundfont engine
-    SoundFontEngine.init().catch((e) => console.warn('[useSoundFont] Init warning:', e));
+    // Eagerly initialize soundfont engine connected to audioSynth soundfontBus
+    audioSynth.initContext();
+    SoundFontEngine.init(audioSynth.getAudioContext(), audioSynth.getSoundfontBus()).catch((e) =>
+      console.warn('[useSoundFont] Init warning:', e)
+    );
 
     return () => {
       unsubEngine();

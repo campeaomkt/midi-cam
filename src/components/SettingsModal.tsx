@@ -1148,7 +1148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </select>
           </div>
 
-          {/* Opção de Áudio na Gravação: Apenas Som do Teclado vs Teclado + Mic */}
+          {/* Opção de Áudio na Gravação: Apenas Som do Teclado vs Teclado + Mic vs Apenas Mic */}
           <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
             <div>
               <span className="text-xs font-bold text-white block">Áudio da Gravação do Vídeo</span>
@@ -1157,13 +1157,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Timbre SF2 Ativo Banner */}
+            <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-zinc-900 to-cyan-500/10 border border-amber-400/30 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Music className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-[10px] text-zinc-400 block uppercase font-bold tracking-wider">Timbre SF2 Atual na Gravação:</span>
+                  <span className="text-xs font-bold text-amber-300 truncate block">
+                    {activeSoundFontName || 'Nenhum SoundFont (.sf2) Carregado'}
+                  </span>
+                </div>
+              </div>
+              {onOpenSoundFontModal && (
+                <button
+                  type="button"
+                  onClick={onOpenSoundFontModal}
+                  className="px-2.5 py-1 rounded-lg bg-amber-400 text-black font-bold text-[10.5px] hover:bg-amber-300 transition shrink-0 shadow cursor-pointer active:scale-95"
+                >
+                  Trocar SF2
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {/* Opção 1: Apenas Teclado (SF2 100% Digital Puro) */}
+              <button
+                type="button"
+                id="btn-audio-source-keyboard-only"
+                onClick={() => onUpdateCamera({ audioRecordSource: 'keyboard-only', micEnabled: false })}
+                className={`p-2.5 rounded-xl text-xs border text-left transition cursor-pointer flex flex-col justify-between ${
+                  cameraSettings.audioRecordSource === 'keyboard-only' || (!cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'mic-only')
+                    ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/30'
+                    : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-extrabold text-xs">🎹 Apenas Teclado (SF2)</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                      cameraSettings.audioRecordSource === 'keyboard-only' || (!cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'mic-only')
+                        ? 'bg-black text-amber-400'
+                        : 'bg-zinc-700 text-zinc-300'
+                    }`}>
+                      100% Puro
+                    </span>
+                  </div>
+                  <div className={`text-[10px] leading-tight ${
+                    cameraSettings.audioRecordSource === 'keyboard-only' || (!cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'mic-only')
+                      ? 'text-black/80 font-medium'
+                      : 'text-zinc-400'
+                  }`}>
+                    Grava exclusivamente o áudio do SoundFont SF2 digital. Microfone mutado, zero eco ou barulho da sala.
+                  </div>
+                </div>
+              </button>
+
+              {/* Opção 2: Teclado + Microfone */}
               <button
                 type="button"
                 id="btn-audio-source-keyboard-and-mic"
                 onClick={() => onUpdateCamera({ audioRecordSource: 'keyboard-and-mic', micEnabled: true })}
                 className={`p-2.5 rounded-xl text-xs border text-left transition cursor-pointer flex flex-col justify-between ${
-                  cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only'
+                  (cameraSettings.audioRecordSource === 'keyboard-and-mic' || !cameraSettings.audioRecordSource) && cameraSettings.micEnabled
                     ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/30'
                     : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
                 }`}
@@ -1172,7 +1227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="flex items-center justify-between gap-1 mb-1">
                     <span className="font-extrabold text-xs">🎙️ Teclado + Microfone</span>
                     <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                      cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only'
+                      (cameraSettings.audioRecordSource === 'keyboard-and-mic' || !cameraSettings.audioRecordSource) && cameraSettings.micEnabled
                         ? 'bg-black text-amber-400'
                         : 'bg-emerald-500/20 text-emerald-400'
                     }`}>
@@ -1180,75 +1235,121 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </span>
                   </div>
                   <div className={`text-[10px] leading-tight ${
-                    cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only' ? 'text-black/80 font-medium' : 'text-zinc-400'
+                    (cameraSettings.audioRecordSource === 'keyboard-and-mic' || !cameraSettings.audioRecordSource) && cameraSettings.micEnabled
+                      ? 'text-black/80 font-medium'
+                      : 'text-zinc-400'
                   }`}>
-                    Grava sua voz pelo microfone misturada ao teclado com equilíbrio de estúdio sem cortes ou saturação.
+                    Grava sua voz pelo microfone misturada ao som digital do teclado com mixagem equilibrada de estúdio.
                   </div>
                 </div>
               </button>
 
+              {/* Opção 3: Apenas Microfone */}
               <button
                 type="button"
-                id="btn-audio-source-keyboard-only"
-                onClick={() => onUpdateCamera({ audioRecordSource: 'keyboard-only', micEnabled: false })}
+                id="btn-audio-source-mic-only"
+                onClick={() => onUpdateCamera({ audioRecordSource: 'mic-only', micEnabled: true })}
                 className={`p-2.5 rounded-xl text-xs border text-left transition cursor-pointer flex flex-col justify-between ${
-                  !cameraSettings.micEnabled || cameraSettings.audioRecordSource === 'keyboard-only'
+                  cameraSettings.audioRecordSource === 'mic-only'
                     ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/30'
                     : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
                 <div>
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="font-extrabold text-xs">🎹 Apenas Som do Teclado</span>
+                    <span className="font-extrabold text-xs">🗣️ Apenas Microfone</span>
                     <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                      !cameraSettings.micEnabled || cameraSettings.audioRecordSource === 'keyboard-only'
+                      cameraSettings.audioRecordSource === 'mic-only'
                         ? 'bg-black text-amber-400'
                         : 'bg-zinc-700 text-zinc-300'
                     }`}>
-                      100% Digital
+                      Ambiente
                     </span>
                   </div>
                   <div className={`text-[10px] leading-tight ${
-                    !cameraSettings.micEnabled || cameraSettings.audioRecordSource === 'keyboard-only' ? 'text-black/80 font-medium' : 'text-zinc-400'
+                    cameraSettings.audioRecordSource === 'mic-only' ? 'text-black/80 font-medium' : 'text-zinc-400'
                   }`}>
-                    Grava exclusivamente o motor de som e soundfonts do app. Microfone mutado.
+                    Grava apenas o microfone (voz e acústica ambiente). Teclado interno não vai para o vídeo.
                   </div>
                 </div>
               </button>
             </div>
 
-            {/* Controles Profissionais de Balanço: Microfone vs Teclado na Gravação */}
-            {cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only' && (
-              <div className="mt-2 p-3 rounded-xl bg-zinc-900/90 border border-white/10 flex flex-col gap-3">
-                {/* Presets Rápidos de Mixagem */}
+            {/* Controles de Volume e Balanço na Gravação */}
+            <div className="mt-2 p-3 rounded-xl bg-zinc-900/90 border border-white/10 flex flex-col gap-3">
+              {/* Presets Rápidos de Mixagem quando ambos estão ativos */}
+              {cameraSettings.micEnabled && cameraSettings.audioRecordSource === 'keyboard-and-mic' && (
                 <div className="flex flex-col gap-1.5">
                   <span className="text-[11px] font-bold text-zinc-300">Equilíbrio Rápido da Mixagem (Estúdio):</span>
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
                       onClick={() => onUpdateCamera({ micGainLevel: 1.5, keyboardRecordingGainLevel: 0.50 })}
-                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95"
+                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95 cursor-pointer"
                     >
                       🗣️ Voz em Alta
                     </button>
                     <button
                       type="button"
-                      onClick={() => onUpdateCamera({ micGainLevel: 1.0, keyboardRecordingGainLevel: 0.65 })}
-                      className="px-2 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-[10.5px] font-bold text-amber-300 transition text-center active:scale-95"
+                      onClick={() => onUpdateCamera({ micGainLevel: 1.0, keyboardRecordingGainLevel: 0.85 })}
+                      className="px-2 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-[10.5px] font-bold text-amber-300 transition text-center active:scale-95 cursor-pointer"
                     >
                       ⚖️ Padrão Estúdio
                     </button>
                     <button
                       type="button"
-                      onClick={() => onUpdateCamera({ micGainLevel: 0.75, keyboardRecordingGainLevel: 0.90 })}
-                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95"
+                      onClick={() => onUpdateCamera({ micGainLevel: 0.75, keyboardRecordingGainLevel: 1.10 })}
+                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95 cursor-pointer"
                     >
                       🎹 Piano Forte
                     </button>
                   </div>
                 </div>
+              )}
 
-                {/* Slider 1: Volume do Microfone (Voz) */}
+              {/* Slider: Volume do Teclado (Timbre SF2) na Gravação */}
+              {cameraSettings.audioRecordSource !== 'mic-only' && (
+                <div className="flex flex-col gap-1 pt-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Volume do Teclado (Timbre SF2) no Vídeo</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-cyan-400 font-bold">
+                        {Math.round((cameraSettings.keyboardRecordingGainLevel ?? 0.85) * 100)}%
+                      </span>
+                      {(cameraSettings.keyboardRecordingGainLevel ?? 0.85) !== 0.85 && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateCamera({ keyboardRecordingGainLevel: 0.85 })}
+                          className="text-[10px] text-zinc-400 hover:text-cyan-400 underline cursor-pointer"
+                        >
+                          Resetar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="1.8"
+                    step="0.05"
+                    value={cameraSettings.keyboardRecordingGainLevel ?? 0.85}
+                    onChange={(e) => onUpdateCamera({ keyboardRecordingGainLevel: parseFloat(e.target.value) })}
+                    className="w-full accent-cyan-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-zinc-400">
+                    <span>20% (Fundo Suave)</span>
+                    <span className="text-cyan-400 font-semibold">85% (Padrão Calibrado)</span>
+                    <span>120%</span>
+                    <span>180% (Forte)</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Slider: Volume do Microfone (Voz) na Gravação */}
+              {cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only' && (
                 <div className="flex flex-col gap-1 pt-2 border-t border-white/5">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
@@ -1286,51 +1387,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>300% (Boost Máx)</span>
                   </div>
                 </div>
+              )}
 
-                {/* Slider 2: Volume do Teclado na Gravação */}
-                <div className="flex flex-col gap-1 pt-2 border-t border-white/5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
-                      <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Volume do Teclado no Vídeo</span>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-cyan-400 font-bold">
-                        {Math.round((cameraSettings.keyboardRecordingGainLevel ?? 0.65) * 100)}%
-                      </span>
-                      {(cameraSettings.keyboardRecordingGainLevel ?? 0.65) !== 0.65 && (
-                        <button
-                          type="button"
-                          onClick={() => onUpdateCamera({ keyboardRecordingGainLevel: 0.65 })}
-                          className="text-[10px] text-zinc-400 hover:text-cyan-400 underline cursor-pointer"
-                        >
-                          Resetar
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.2"
-                    max="1.5"
-                    step="0.05"
-                    value={cameraSettings.keyboardRecordingGainLevel ?? 0.65}
-                    onChange={(e) => onUpdateCamera({ keyboardRecordingGainLevel: parseFloat(e.target.value) })}
-                    className="w-full accent-cyan-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-zinc-400">
-                    <span>20% (Fundo Suave)</span>
-                    <span className="text-cyan-400 font-semibold">65% (Padrão Calibrado)</span>
-                    <span>100%</span>
-                    <span>150% (Intenso)</span>
-                  </div>
-                </div>
-
-                <div className="text-[10px] text-zinc-400 bg-black/40 p-2 rounded-lg border border-white/5 leading-relaxed">
-                  🛡️ <strong>Zero Clipping / Limiter Ativo</strong>: Compressor e limiter de estúdio em tempo real garantem que o piano e a voz nunca distorçam ou saturem o áudio do vídeo, mesmo em acordes pesados.
-                </div>
+              <div className="text-[10px] text-zinc-400 bg-black/40 p-2 rounded-lg border border-white/5 leading-relaxed">
+                🛡️ <strong>Zero Clipping / Limiter Ativo</strong>: Compressor e limiter de estúdio em tempo real garantem que o som do timbre SF2 e a voz nunca distorçam ou saturem o arquivo final de vídeo.
               </div>
-            )}
+            </div>
           </div>
         </div>
 

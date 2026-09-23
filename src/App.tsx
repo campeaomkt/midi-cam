@@ -31,13 +31,12 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { SoundFontEngine } from './audio/SoundFontEngine';
 import { wifiMidiBridge } from './utils/wifiMidiBridge';
 import { useMediaDevices } from './hooks/useMediaDevices';
+import { unlockAudioContext } from './utils/iosAudioUnlock';
 
-export default function App() {
-  const { cameras, microphones, refreshDevices } = useMediaDevices();
-  const recordingAudioCleanupRef = useRef<(() => void) | null>(null);
+const CAMERA_SETTINGS_STORAGE_KEY = 'piano_camera_settings_v3';
 
-  // Camera Configuration State
-  const [cameraSettings, setCameraSettings] = useState<CameraSettings>({
+function loadStoredCameraSettings(): CameraSettings {
+  const defaults: CameraSettings = {
     facingMode: 'environment',
     resolution: '1080P',
     fps: 30,
@@ -48,9 +47,35 @@ export default function App() {
     recordingMode: 'overlay', // Default to Overlay so keyboard, animated keys and chords are burned into the recorded video
     aspectRatio: '9:16', // Default 9:16 vertical ratio for Reels/TikTok/Shorts
     audioRecordSource: 'keyboard-and-mic', // Default to Keyboard + Mic so voice is recorded seamlessly when mic is active
-    micGainLevel: 1.0, // Default 1.0 (with 2.5x base studio vocal preamp)
-    keyboardRecordingGainLevel: 0.65, // Studio keyboard mix balance (prevents clipping and drowning out voice)
-  });
+    micGainLevel: 1.0, // Default 1.0 (with studio vocal preamp)
+    keyboardRecordingGainLevel: 0.85, // Studio keyboard mix balance
+  };
+  try {
+    const saved = localStorage.getItem(CAMERA_SETTINGS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...defaults, ...parsed };
+    }
+  } catch {}
+  return defaults;
+}
+
+export default function App() {
+  const { cameras, microphones, refreshDevices } = useMediaDevices();
+  const recordingAudioCleanupRef = useRef<(() => void) | null>(null);
+
+  // Camera Configuration State persisted in localStorage
+  const [cameraSettings, setCameraSettings] = useState<CameraSettings>(loadStoredCameraSettings);
+
+  const handleUpdateCamera = useCallback((updates: Partial<CameraSettings>) => {
+    setCameraSettings((prev) => {
+      const next = { ...prev, ...updates };
+      try {
+        localStorage.setItem(CAMERA_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
   const [keyboardSettings, setKeyboardSettings] = useState<KeyboardSettings>({
@@ -378,15 +403,20 @@ export default function App() {
       const filterCss = getCombinedFilterStyle(activeFilter, filterAdjustments);
       const keyboardElem = document.getElementById('virtual-piano-keyboard');
 
-      // Ensure audio context is running for perfect synchronization
+      // Ensure audio context is running and unlocked for perfect synchronization
       const audioCtx = audioSynth.getAudioContext();
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
+      unlockAudioContext(audioCtx);
 
-      // Audio setup: Check if microphone should be recorded
-      // When micEnabled is true (top HUD mic is active) and audioRecordSource is not keyboard-only
-      const shouldRecordMic = cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only';
+      // Audio setup: Respect user's pre-configured choice
+      // 'keyboard-only': Records 100% digital SF2 SoundFont timbre directly, mic is completely muted
+      // 'keyboard-and-mic': Records SF2 SoundFont mixed with microphone
+      // 'mic-only': Records only microphone
+      const audioSource = cameraSettings.audioRecordSource || (cameraSettings.micEnabled ? 'keyboard-and-mic' : 'keyboard-only');
+      const shouldRecordMic = (audioSource === 'keyboard-and-mic' || audioSource === 'mic-only') && cameraSettings.micEnabled;
+      const shouldRecordKeyboard = audioSource !== 'mic-only';
 
       let micStream: MediaStream | null = null;
       if (shouldRecordMic) {
@@ -425,8 +455,8 @@ export default function App() {
         }
       }
 
-      const micGain = cameraSettings.micGainLevel !== undefined ? cameraSettings.micGainLevel : 1.0;
-      const keyboardGain = cameraSettings.keyboardRecordingGainLevel !== undefined ? cameraSettings.keyboardRecordingGainLevel : 0.65;
+      const micGain = shouldRecordMic ? (cameraSettings.micGainLevel !== undefined ? cameraSettings.micGainLevel : 1.0) : 0;
+      const keyboardGain = shouldRecordKeyboard ? (cameraSettings.keyboardRecordingGainLevel !== undefined ? cameraSettings.keyboardRecordingGainLevel : 0.85) : 0;
       const { stream: recAudioStream, cleanup: audioCleanup } = audioSynth.getRecordingAudioStream(
         micStream,
         micGain,
@@ -574,7 +604,7 @@ export default function App() {
             onFlipCamera={handleFlipCamera}
             onOpenWifiSync={() => setIsWifiSyncOpen(true)}
             onToggleSustain={handleToggleSustain}
-            onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
+            onUpdateCamera={handleUpdateCamera}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenTypographyModal={() => setIsTypographyOpen(true)}
@@ -601,7 +631,7 @@ export default function App() {
             onNotePlay={handleNotePlay}
             onNoteRelease={handleNoteRelease}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
-            onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
+            onUpdateCamera={handleUpdateCamera}
           />
         </section>
 
@@ -615,7 +645,7 @@ export default function App() {
             activeFilter={activeFilter}
             availableFilters={FILTER_PRESETS}
             lastThumbnailUrl={recordings[0]?.thumbnailUrl}
-            onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
+            onUpdateCamera={handleUpdateCamera}
             onSelectFilter={(id) => setActiveFilterId(id)}
             onToggleRecording={handleToggleRecording}
             onFlipCamera={handleFlipCamera}
@@ -644,7 +674,7 @@ export default function App() {
         }}
         onOpenSoundFontModal={() => setIsSoundFontOpen(true)}
         onRequestMidi={handleRequestMidi}
-        onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
+        onUpdateCamera={handleUpdateCamera}
         onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
       />
 

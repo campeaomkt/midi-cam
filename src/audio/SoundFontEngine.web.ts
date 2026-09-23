@@ -76,9 +76,7 @@ export class SoundFontEngineWeb {
   }
 
   public connectDestination(target: AudioNode): void {
-    if (this.destinationNode === target && this.masterGainNode) {
-      return;
-    }
+    if (!target) return;
     this.destinationNode = target;
     if (!this.masterGainNode) {
       return;
@@ -94,10 +92,6 @@ export class SoundFontEngineWeb {
   }
 
   private async ensureEngineReady(audioContext?: AudioContext, destination?: AudioNode): Promise<void> {
-    if (this.isReady && this.fluidSynth.getIsReady()) {
-      return;
-    }
-
     this.ctx = audioContext || this.ctx || getSharedAudioContext();
     if (this.ctx.state === 'suspended') {
       ensureAudioContextRunning(this.ctx).catch(() => {});
@@ -111,16 +105,17 @@ export class SoundFontEngineWeb {
     const target = destination || this.destinationNode || this.ctx.destination;
     this.connectDestination(target);
 
+    if (this.isReady && this.fluidSynth.getIsReady()) {
+      return;
+    }
+
     await this.fluidSynth.init(this.ctx, this.masterGainNode);
     this.isReady = true;
   }
 
   public async init(audioContext?: AudioContext, destination?: AudioNode): Promise<void> {
     if (destination) {
-      this.destinationNode = destination;
-      if (this.masterGainNode) {
-        this.connectDestination(destination);
-      }
+      this.connectDestination(destination);
     }
 
     if (this.isReady && this.fluidSynth.getIsReady()) {
@@ -130,6 +125,9 @@ export class SoundFontEngineWeb {
     if (this.initPromise) {
       try {
         await this.initPromise;
+        if (destination) {
+          this.connectDestination(destination);
+        }
         if (this.isReady && this.fluidSynth.getIsReady()) {
           return;
         }
