@@ -1,4 +1,6 @@
 import { MidiDevice } from '../types';
+import { SoundFontEngine } from '../audio/SoundFontEngine';
+import { audioSynth } from './audioSynth';
 
 export type NoteCallback = (midiNumber: number, velocity: number) => void;
 export type NoteOffCallback = (midiNumber: number) => void;
@@ -29,7 +31,6 @@ class MidiManager {
   private devices: MidiDevice[] = [];
   private sustainActive: boolean = false;
   private heldKeys: Set<number> = new Set();
-  private sustainedNotes: Set<number> = new Set();
 
   constructor() {
     this.isSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
@@ -54,22 +55,9 @@ class MidiManager {
   public setSustain(active: boolean) {
     if (this.sustainActive === active) return;
     this.sustainActive = active;
+    SoundFontEngine.setSustain(active);
+    audioSynth.setSustain(active);
     this.notifySustainListeners(active);
-
-    if (!active) {
-      // Sustain pedal released: Stop all notes that were sustained by the pedal
-      // and are no longer physically held down by fingers
-      const notesToStop: number[] = [];
-      this.sustainedNotes.forEach((note) => {
-        if (!this.heldKeys.has(note)) {
-          notesToStop.push(note);
-        }
-      });
-      this.sustainedNotes.clear();
-      notesToStop.forEach((note) => {
-        this.notifyNoteOff(note);
-      });
-    }
   }
 
   public async requestAccess(): Promise<{ success: boolean; message?: string }> {
@@ -159,27 +147,33 @@ class MidiManager {
     else if (command === 11) {
       const ccNumber = note;
       const ccValue = velocity;
-      // CC 64 = Damper/Sustain Pedal
+      // CC 64 = Damper/Sustain Pedal with Hysteresis (64 on / 40 off) per spec
       if (ccNumber === 64) {
-        this.setSustain(ccValue >= 64);
+        if (ccValue >= 64 && !this.sustainActive) {
+          this.setSustain(true);
+        } else if (ccValue <= 40 && this.sustainActive) {
+          this.setSustain(false);
+        }
       }
     }
   }
 
+  public panic() {
+    this.heldKeys.clear();
+    this.sustainActive = false;
+    SoundFontEngine.panic();
+    audioSynth.stopAllNotes();
+    this.notifySustainListeners(false);
+  }
+
   private handleNoteOn(note: number, velocity: number) {
     this.heldKeys.add(note);
-    this.sustainedNotes.delete(note);
     this.notifyNoteOn(note, velocity);
   }
 
   private handleNoteOff(note: number) {
     this.heldKeys.delete(note);
-    if (this.sustainActive) {
-      this.sustainedNotes.add(note);
-    } else {
-      this.sustainedNotes.delete(note);
-      this.notifyNoteOff(note);
-    }
+    this.notifyNoteOff(note);
   }
 
   public onNoteOn(cb: NoteCallback): () => void {

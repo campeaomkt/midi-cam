@@ -86,6 +86,7 @@ export interface KeyboardSettings {
   glowIntensity?: number; // 0 to 100 percentage for key illumination glow
   soundEnabled: boolean;
   synthVolume: number;
+  velocityCurve?: 'natural' | 'soft' | 'hard' | 'fixed'; // MIDI velocity dynamic sensitivity curve
   viewMode: 'fit' | 'scroll'; // 'fit' fits entire piano on screen, 'scroll' allows touch navigation
 }
 
@@ -103,12 +104,14 @@ export interface CameraSettings {
   gridEnabled: boolean;
   micEnabled: boolean;
   flashEnabled: boolean;
+  mirrorVideo?: boolean; // whether to flip video horizontally (default true for front mobile, false for desktop USB)
   recordingMode?: 'overlay' | 'direct'; // 'overlay' embeds keyboard & chord into video, 'direct' records raw camera stream for 0% CPU lag
   aspectRatio?: '9:16' | '16:9' | 'auto'; // '9:16' vertical (Reels/TikTok/Shorts), '16:9' widescreen, or 'auto'
   selectedVideoDeviceId?: string; // specific camera device ID
   selectedAudioDeviceId?: string; // specific microphone device ID
   audioRecordSource?: 'keyboard-only' | 'keyboard-and-mic'; // record keyboard only or keyboard + microphone
-  micGainLevel?: number; // 0.0 to 2.0 (default 1.0)
+  micGainLevel?: number; // 0.5 to 4.0 (studio vocal preamp boost, default 2.5)
+  keyboardRecordingGainLevel?: number; // 0.2 to 1.5 (studio keyboard mix balance, default 0.65)
 }
 
 export type WifiSyncMode = 'idle' | 'host' | 'client';
@@ -123,4 +126,7 @@ export interface WifiSyncStatus {
   latencyMs: number | null;
   error: string | null;
   lastActiveTimestamp?: number;
+  isStreamingCamera?: boolean;
+  hasRemoteCameraStream?: boolean;
+  isUsingRemoteCamera?: boolean;
 }

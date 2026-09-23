@@ -15,6 +15,7 @@ import {
   AlertCircle,
   Music,
   Wifi,
+  Video,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -25,6 +26,8 @@ interface TopHudBarProps {
   activeSoundFontName?: string;
   isSustainActive?: boolean;
   wifiSyncStatus?: WifiSyncStatus;
+  cameras?: MediaDeviceInfo[];
+  onFlipCamera?: () => void;
   onOpenWifiSync?: () => void;
   onToggleSustain?: () => void;
   onUpdateCamera: (settings: Partial<CameraSettings>) => void;
@@ -44,6 +47,8 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
   activeSoundFontName,
   isSustainActive = false,
   wifiSyncStatus,
+  cameras,
+  onFlipCamera,
   onOpenWifiSync,
   onToggleSustain,
   onUpdateCamera,
@@ -237,7 +242,17 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               title="Sincronização Wi-Fi (PC ⇄ Celular)"
             >
               <Wifi className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
-              {wifiSyncStatus?.isConnected ? (
+              {wifiSyncStatus?.isStreamingCamera ? (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-cyan-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                  <span>Stream Celular</span>
+                </span>
+              ) : wifiSyncStatus?.hasRemoteCameraStream ? (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-cyan-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                  <span>Câm. Celular</span>
+                </span>
+              ) : wifiSyncStatus?.isConnected ? (
                 <span className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
                   <span className="font-mono text-[11px] font-bold">
@@ -249,6 +264,22 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               ) : (
                 <span className="whitespace-nowrap text-[11px] font-semibold">Wi-Fi PC</span>
               )}
+            </button>
+          )}
+
+          {/* Quick Camera Switcher for Multi-camera / Desktop setups */}
+          {cameras && cameras.length > 1 && onFlipCamera && (
+            <button
+              type="button"
+              id="btn-quick-switch-camera"
+              onClick={onFlipCamera}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium backdrop-blur-md border border-white/15 bg-black/50 text-zinc-300 hover:text-white hover:border-amber-400/40 transition cursor-pointer active:scale-95"
+              title="Trocar Câmera Ativa (Clique para alternar entre as webcams)"
+            >
+              <Video className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="truncate max-w-[85px] sm:max-w-[120px] text-[11px] font-semibold">
+                {cameras.find((c) => c.deviceId === cameraSettings.selectedVideoDeviceId)?.label?.slice(0, 14) || 'Trocar Câm.'}
+              </span>
             </button>
           )}
 

@@ -16,6 +16,9 @@ import {
   Zap,
   X,
   Sliders,
+  Video,
+  VideoOff,
+  Camera,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { wifiMidiBridge } from '../utils/wifiMidiBridge';
@@ -40,6 +43,10 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [lastNoteActivity, setLastNoteActivity] = useState<string | null>(null);
+  const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
+  const [cameraResolution, setCameraResolution] = useState<'1080P' | '720P'>('1080P');
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const inputCodeId = useId();
 
   // Subscribe to Wi-Fi sync status changes
@@ -117,6 +124,21 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
       setCopiedCmd(id);
       setTimeout(() => setCopiedCmd(null), 2000);
     });
+  };
+
+  const handleToggleCameraStream = async () => {
+    if (syncStatus.isStreamingCamera) {
+      wifiMidiBridge.stopCameraStream();
+      setCameraError(null);
+    } else {
+      setIsStartingCamera(true);
+      setCameraError(null);
+      const res = await wifiMidiBridge.startCameraStream(cameraFacing, cameraResolution);
+      setIsStartingCamera(false);
+      if (!res.success && res.error) {
+        setCameraError(res.error);
+      }
+    }
   };
 
   const midiDevices = midiManager.getDevices();
@@ -235,6 +257,95 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                   <p className="text-xs text-zinc-300">
                     Toque no teclado conectado ao PC ou na sua DAW. As notas vão acender na tela do celular e entrar no vídeo em tempo real!
                   </p>
+
+                  {/* Remote Camera Stream Box (Iriun Webcam Style) */}
+                  <div className="mt-1 p-3.5 rounded-xl bg-black/60 border border-cyan-500/40 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400">
+                          <Video className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h5 className="font-bold text-xs text-cyan-200">
+                            Câmera Remota (Modo Iriun Webcam)
+                          </h5>
+                          <p className="text-[11px] text-zinc-400">
+                            Espelha a câmera do celular no PC para gravar direto de lá
+                          </p>
+                        </div>
+                      </div>
+
+                      {syncStatus.isStreamingCamera && (
+                        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold animate-pulse">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                          Transmitindo HD
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Camera Options */}
+                    {!syncStatus.isStreamingCamera && (
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-zinc-400 uppercase font-semibold">Lente</label>
+                          <select
+                            value={cameraFacing}
+                            onChange={(e) => setCameraFacing(e.target.value as 'environment' | 'user')}
+                            className="w-full bg-zinc-900 border border-white/10 rounded-lg p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+                          >
+                            <option value="environment">Traseira (Principal)</option>
+                            <option value="user">Frontal (Selfie)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-zinc-400 uppercase font-semibold">Qualidade</label>
+                          <select
+                            value={cameraResolution}
+                            onChange={(e) => setCameraResolution(e.target.value as '1080P' | '720P')}
+                            className="w-full bg-zinc-900 border border-white/10 rounded-lg p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+                          >
+                            <option value="1080P">1080p (Full HD 60fps)</option>
+                            <option value="720P">720p (HD 60fps)</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {cameraError && (
+                      <div className="text-[11px] text-red-400 bg-red-950/40 border border-red-500/30 p-2 rounded-lg">
+                        {cameraError}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleToggleCameraStream}
+                      disabled={isStartingCamera}
+                      className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-md ${
+                        syncStatus.isStreamingCamera
+                          ? 'bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-300'
+                          : 'bg-cyan-500 hover:bg-cyan-400 text-black shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                      }`}
+                    >
+                      {isStartingCamera ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Iniciando Câmera...</span>
+                        </>
+                      ) : syncStatus.isStreamingCamera ? (
+                        <>
+                          <VideoOff className="w-3.5 h-3.5" />
+                          <span>Parar Transmissão da Câmera</span>
+                        </>
+                      ) : (
+                        <>
+                          <Video className="w-3.5 h-3.5" />
+                          <span>Transmitir Câmera do Celular para o PC</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
 
                   <button
                     type="button"
@@ -400,6 +511,25 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                       <div className="flex items-center gap-2 text-xs text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 rounded-lg animate-pulse">
                         <Activity className="w-3.5 h-3.5" />
                         <span>Sinal MIDI detectado: {lastNoteActivity}</span>
+                      </div>
+                    )}
+
+                    {syncStatus.hasRemoteCameraStream && (
+                      <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-500/40 space-y-1 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Video className="w-4 h-4 text-cyan-400" />
+                            <span className="text-xs font-bold text-cyan-200">
+                              Câmera do Celular Espelhada (Modo Iriun 60 FPS)
+                            </span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold">
+                            Ativa no PC
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-300 leading-relaxed">
+                          O visor do seu PC agora está usando a câmera de alta definição do celular via Wi-Fi. Grave e visualize tudo sincronizado!
+                        </p>
                       </div>
                     )}
                   </div>

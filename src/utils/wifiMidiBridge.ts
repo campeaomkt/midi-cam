@@ -1,4 +1,4 @@
-import { Peer, DataConnection } from 'peerjs';
+import { Peer, DataConnection, MediaConnection } from 'peerjs';
 import { midiManager } from './midiManager';
 import { WifiSyncMode, WifiSyncStatus } from '../types';
 
@@ -8,7 +8,8 @@ export type WifiSyncMessage =
   | { type: 'sustain'; active: boolean; timestamp?: number }
   | { type: 'ping'; time: number }
   | { type: 'pong'; time: number }
-  | { type: 'deviceInfo'; name: string; devices?: string[] };
+  | { type: 'deviceInfo'; name: string; devices?: string[] }
+  | { type: 'cameraStreamState'; isStreaming: boolean };
 
 export type WifiSyncListener = (status: WifiSyncStatus) => void;
 
@@ -26,6 +27,13 @@ class WifiMidiBridge {
   private listeners: Set<WifiSyncListener> = new Set();
   private unbindMidiListeners: (() => void)[] = [];
   private lastActiveTimestamp: number = Date.now();
+
+  // Mobile Camera / Iriun Webcam over Wi-Fi
+  private localCameraStream: MediaStream | null = null;
+  private remoteCameraStream: MediaStream | null = null;
+  private activeMediaCall: MediaConnection | null = null;
+  private isStreamingCameraFlag: boolean = false;
+  private remoteStreamListeners: Set<(stream: MediaStream | null) => void> = new Set();
 
   constructor() {
     // If URL has ?sync=CODE parameter on load, we will expose a helper to auto-connect
@@ -47,6 +55,9 @@ class WifiMidiBridge {
       latencyMs: this.latencyMs,
       error: this.error,
       lastActiveTimestamp: this.lastActiveTimestamp,
+      isStreamingCamera: this.isStreamingCameraFlag,
+      hasRemoteCameraStream: !!this.remoteCameraStream,
+      isUsingRemoteCamera: !!this.remoteCameraStream,
     };
   }
 
@@ -128,6 +139,10 @@ class WifiMidiBridge {
           this.handleIncomingClientConnection(conn);
         });
 
+        peer.on('call', (call) => {
+          this.handleIncomingMediaCall(call);
+        });
+
         peer.on('error', (err) => {
           console.warn('[WiFi MIDI Host Error]', err);
           this.isConnecting = false;
@@ -188,6 +203,12 @@ class WifiMidiBridge {
       const msg = raw as WifiSyncMessage;
       if (msg && msg.type === 'ping') {
         conn.send({ type: 'pong', time: msg.time });
+      } else if (msg && msg.type === 'cameraStreamState') {
+        if (!msg.isStreaming && this.remoteCameraStream) {
+          this.remoteCameraStream = null;
+          this.notifyRemoteStream(null);
+          this.notify();
+        }
       }
     });
 
@@ -287,6 +308,10 @@ class WifiMidiBridge {
 
         this.peer = peer;
 
+        peer.on('call', (call) => {
+          this.handleIncomingMediaCall(call);
+        });
+
         peer.on('open', () => {
           const conn = peer.connect(hostPeerId, {
             reliable: false, // Low latency UDP-like channel for notes
@@ -324,6 +349,12 @@ class WifiMidiBridge {
                 this.hostDeviceName = msg.name;
               }
               this.notify();
+            } else if (msg.type === 'cameraStreamState') {
+              if (!msg.isStreaming && this.remoteCameraStream) {
+                this.remoteCameraStream = null;
+                this.notifyRemoteStream(null);
+                this.notify();
+              }
             }
           });
 
@@ -381,8 +412,185 @@ class WifiMidiBridge {
     }
   }
 
+  private handleIncomingMediaCall(call: MediaConnection) {
+    console.log('[WiFi Bridge] Incoming camera stream call from peer:', call.peer);
+    this.activeMediaCall = call;
+
+    // Answer call (we act as the receiver of the mobile video feed)
+    try {
+      call.answer();
+    } catch (e) {
+      console.warn('[WiFi Bridge] Error answering media call:', e);
+    }
+
+    call.on('stream', (remoteStream: MediaStream) => {
+      console.log('[WiFi Bridge] Remote camera stream received! Tracks:', remoteStream.getTracks().length);
+      this.remoteCameraStream = remoteStream;
+      this.notifyRemoteStream(remoteStream);
+      this.notify();
+    });
+
+    call.on('close', () => {
+      console.log('[WiFi Bridge] Remote camera call ended');
+      if (this.remoteCameraStream) {
+        this.remoteCameraStream = null;
+        this.notifyRemoteStream(null);
+        this.notify();
+      }
+    });
+
+    call.on('error', (err: unknown) => {
+      console.warn('[WiFi Bridge] Remote camera call error:', err);
+    });
+  }
+
+  /**
+   * INICIAR TRANSMISSÃO DA CÂMERA DO CELULAR PARA O PC (Modo Iriun Webcam)
+   * Captura a câmera do celular em tempo real e transmite via WebRTC P2P para o PC
+   */
+  public async startCameraStream(
+    facingMode: 'environment' | 'user' = 'environment',
+    resolution: '1080P' | '720P' = '1080P'
+  ): Promise<{ success: boolean; stream?: MediaStream; error?: string }> {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return { success: false, error: 'Câmera não suportada neste dispositivo.' };
+    }
+
+    if (!this.peer || this.peer.destroyed) {
+      return { success: false, error: 'Conexão Wi-Fi não está ativa. Inicie ou conecte a uma sala primeiro.' };
+    }
+
+    this.stopCameraStream();
+
+    try {
+      const widthIdeal = resolution === '720P' ? 1280 : 1920;
+      const heightIdeal = resolution === '720P' ? 720 : 1080;
+
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: widthIdeal },
+            height: { ideal: heightIdeal },
+            frameRate: { ideal: 60, max: 60 },
+          },
+          audio: false,
+        });
+      } catch (e1) {
+        console.warn('[WiFi Camera] High-res constraints failed, falling back to basic video', e1);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode },
+          audio: false,
+        });
+      }
+
+      if (!stream) {
+        return { success: false, error: 'Não foi possível capturar a câmera.' };
+      }
+
+      this.localCameraStream = stream;
+      this.isStreamingCameraFlag = true;
+
+      // Handle user stopping stream in browser/system UI
+      stream.getVideoTracks().forEach((track) => {
+        track.onended = () => {
+          this.stopCameraStream();
+        };
+      });
+
+      // Transmit stream to connected peer(s)
+      if (this.mode === 'client' && this.roomCode) {
+        const hostPeerId = this.formatPeerId(this.roomCode);
+        const call = this.peer.call(hostPeerId, stream);
+        this.activeMediaCall = call;
+        if (this.activeClientConnection && this.activeClientConnection.open) {
+          this.activeClientConnection.send({ type: 'cameraStreamState', isStreaming: true });
+        }
+      } else if (this.mode === 'host' && this.connections.size > 0) {
+        this.connections.forEach((conn) => {
+          if (this.peer) {
+            const call = this.peer.call(conn.peer, stream);
+            this.activeMediaCall = call;
+          }
+        });
+        this.broadcastMessage({ type: 'cameraStreamState', isStreaming: true });
+      }
+
+      this.notify();
+      return { success: true, stream };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Falha ao acessar a câmera do celular.';
+      console.error('[WiFi Camera Start Error]', err);
+      this.isStreamingCameraFlag = false;
+      this.notify();
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * PARAR TRANSMISSÃO DA CÂMERA DO CELULAR
+   */
+  public stopCameraStream() {
+    if (this.localCameraStream) {
+      this.localCameraStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
+      this.localCameraStream = null;
+    }
+
+    if (this.activeMediaCall) {
+      try {
+        this.activeMediaCall.close();
+      } catch {}
+      this.activeMediaCall = null;
+    }
+
+    this.isStreamingCameraFlag = false;
+
+    if (this.mode === 'client' && this.activeClientConnection && this.activeClientConnection.open) {
+      this.activeClientConnection.send({ type: 'cameraStreamState', isStreaming: false });
+    } else if (this.mode === 'host') {
+      this.broadcastMessage({ type: 'cameraStreamState', isStreaming: false });
+    }
+
+    this.notify();
+  }
+
+  public getRemoteCameraStream(): MediaStream | null {
+    return this.remoteCameraStream;
+  }
+
+  public getLocalCameraStream(): MediaStream | null {
+    return this.localCameraStream;
+  }
+
+  public subscribeRemoteStream(listener: (stream: MediaStream | null) => void): () => void {
+    this.remoteStreamListeners.add(listener);
+    listener(this.remoteCameraStream);
+    return () => this.remoteStreamListeners.delete(listener);
+  }
+
+  private notifyRemoteStream(stream: MediaStream | null) {
+    this.remoteStreamListeners.forEach((l) => {
+      try {
+        l(stream);
+      } catch (e) {
+        console.error('[WiFi Bridge] Error in remote stream listener:', e);
+      }
+    });
+  }
+
   public disconnect() {
     this.stopPingLoop();
+    this.stopCameraStream();
+
+    if (this.remoteCameraStream) {
+      this.remoteCameraStream = null;
+      this.notifyRemoteStream(null);
+    }
 
     this.unbindMidiListeners.forEach((fn) => fn());
     this.unbindMidiListeners = [];

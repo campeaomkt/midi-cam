@@ -85,13 +85,6 @@ export const BUILTIN_INSTRUMENTS: TimbrePreset[] = [
     isBuiltinSampled: true,
     soundfontName: 'bright_acoustic_piano',
   },
-  {
-    id: 'builtin_synth',
-    name: 'Sintetizador Integrado',
-    category: 'synth',
-    icon: '🎛️',
-    description: 'Síntese analógica virtual leve que funciona 100% offline sem download',
-  },
 ];
 
 const NOTE_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -283,8 +276,8 @@ class TimbreEngine {
           this.stopNote(midiNumber);
 
           const node = player.play(noteName, now, {
-            gain: Math.pow(normalizedVel, 1.2) * 1.1,
-            release: 0.15,
+            gain: Math.pow(normalizedVel, 1.7) * 0.55,
+            release: 0.25,
           });
 
           if (node && typeof node.stop === 'function') {

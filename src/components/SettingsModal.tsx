@@ -233,8 +233,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="flex items-center gap-2">
               <Music className="w-5 h-5 text-amber-400" />
               <div>
-                <h4 className="text-sm font-bold">Som do Teclado (Sintetizador)</h4>
-                <p className="text-xs text-zinc-400">Gera som de piano e grava no vídeo</p>
+                <h4 className="text-sm font-bold">Som do Teclado (Motor FluidSynth SF2)</h4>
+                <p className="text-xs text-zinc-400">Toca exclusivamente o timbre .sf2 carregado (mudo sem SoundFont)</p>
               </div>
             </div>
 
@@ -261,10 +261,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="range"
                 min="0"
                 max="1"
-                step="0.05"
+                step="0.01"
                 value={keyboardSettings.synthVolume}
                 onChange={(e) => onUpdateKeyboard({ synthVolume: parseFloat(e.target.value) })}
-                className="w-full accent-amber-400 h-1.5 bg-zinc-900 rounded-lg cursor-pointer"
+                className="w-full accent-amber-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
               />
 
               {/* SoundFont 2 (.sf2) Manager Trigger */}
@@ -275,7 +275,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div>
                       <span className="text-xs font-bold block text-white">Timbres & SoundFont (.sf2)</span>
                       <span className="text-[11px] text-zinc-400 block">
-                        {activeSoundFontName ? `Ativo: ${activeSoundFontName}` : 'Usando sintetizador padrão'}
+                        {activeSoundFontName && activeSoundFontName !== 'Nenhum SoundFont Ativo'
+                          ? `Ativo: ${activeSoundFontName}`
+                          : 'Nenhum timbre ativo (Mudo)'}
                       </span>
                     </div>
                   </div>
@@ -857,6 +859,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
+        {/* Section: Sensibilidade das Teclas (Velocidade MIDI & Dinâmica) */}
+        <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-amber-400" />
+              <div>
+                <h4 className="text-sm font-bold text-white">Sensibilidade das Teclas (Curva MIDI)</h4>
+                <p className="text-xs text-zinc-400">
+                  Ajuste como a força do toque no controlador afeta o volume e o timbre
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-mono font-bold text-amber-400 px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/20">
+              {keyboardSettings.velocityCurve === 'fixed'
+                ? 'Fixa (100%)'
+                : keyboardSettings.velocityCurve === 'soft'
+                ? 'Suave'
+                : keyboardSettings.velocityCurve === 'hard'
+                ? 'Pesada'
+                : 'Natural'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              {
+                id: 'natural',
+                name: 'Natural (Estúdio)',
+                badge: 'Recomendada',
+                desc: 'Equilíbrio doce e aveludado (85-95) para toques normais, idêntico à resposta suave do mouse.',
+              },
+              {
+                id: 'fixed',
+                name: 'Fixa (Como Mouse)',
+                badge: '95 Fixo',
+                desc: 'Todas as notas tocam no mesmo volume e timbre perfeitos do clique do mouse.',
+              },
+              {
+                id: 'soft',
+                name: 'Suave',
+                badge: 'Mini Teclas',
+                desc: 'Mais sensível e com som encorpado mesmo com toques muito leves.',
+              },
+              {
+                id: 'hard',
+                name: 'Pesada',
+                badge: 'Linear 1:1',
+                desc: 'Resposta linear direta para teclados com teclas pesadas de martelo (Hammer Action).',
+              },
+            ].map((curve) => {
+              const isSelected = (keyboardSettings.velocityCurve || 'natural') === curve.id;
+              return (
+                <button
+                  key={curve.id}
+                  type="button"
+                  onClick={() => onUpdateKeyboard({ velocityCurve: curve.id as any })}
+                  className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-amber-400 text-black border-amber-300 font-bold shadow-md ring-2 ring-amber-400/40'
+                      : 'bg-zinc-900 border-white/10 text-zinc-300 hover:bg-zinc-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-extrabold">{curve.name}</span>
+                    <span
+                      className={`text-[9px] px-1 py-0.5 rounded font-bold ${
+                        isSelected ? 'bg-black/20 text-black' : 'bg-white/10 text-zinc-400'
+                      }`}
+                    >
+                      {curve.badge}
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] leading-tight ${
+                      isSelected ? 'text-black/80 font-medium' : 'text-zinc-400'
+                    }`}
+                  >
+                    {curve.desc}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Section: Dispositivos de Câmera & Microfone e Fonte de Áudio */}
         <div className="flex flex-col gap-3.5 p-3.5 rounded-xl bg-zinc-800/60 border border-white/10">
           <div className="flex items-center justify-between">
@@ -899,12 +986,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="w-full bg-zinc-900 border border-white/15 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 cursor-pointer"
             >
               <option value="">Câmera Automática / Padrão ({cameraSettings.facingMode === 'user' ? 'Frontal' : 'Traseira'})</option>
-              {cameras && cameras.map((cam, idx) => (
-                <option key={cam.deviceId || idx} value={cam.deviceId}>
-                  {cam.label || `Câmera ${idx + 1}`}
-                </option>
-              ))}
+              {cameras && cameras.map((cam, idx) => {
+                const isVirtual = /iriun|obs|droidcam|virtual|vcam/i.test(cam.label || '');
+                return (
+                  <option key={cam.deviceId || idx} value={cam.deviceId}>
+                    {cam.label || `Câmera ${idx + 1}`} {isVirtual ? '(Virtual)' : ''}
+                  </option>
+                );
+              })}
             </select>
+          </div>
+
+          {/* Espelhar Câmera Toggle */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-white/10">
+            <div>
+              <span className="text-xs font-bold text-white block">Espelhar Vídeo (Modo Selfie/Espelho)</span>
+              <span className="text-[10.5px] text-zinc-400 block">
+                Inverte o vídeo horizontalmente para manter a orientação natural das mãos
+              </span>
+            </div>
+            <button
+              type="button"
+              id="btn-toggle-mirror-video"
+              onClick={() =>
+                onUpdateCamera({
+                  mirrorVideo:
+                    cameraSettings.mirrorVideo !== undefined
+                      ? !cameraSettings.mirrorVideo
+                      : cameraSettings.facingMode !== 'user',
+                })
+              }
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer active:scale-95 ${
+                (cameraSettings.mirrorVideo ?? (cameraSettings.facingMode === 'user'))
+                  ? 'bg-amber-400 text-black shadow-sm'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-white border border-white/10'
+              }`}
+            >
+              {(cameraSettings.mirrorVideo ?? (cameraSettings.facingMode === 'user')) ? 'Espelhado (Ativo)' : 'Normal'}
+            </button>
           </div>
 
           {/* Seleção de Microfone */}
@@ -1002,43 +1121,117 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            {/* Slider de Sensibilidade/Volume do Microfone na Gravação */}
+            {/* Controles Profissionais de Balanço: Microfone vs Teclado na Gravação */}
             {cameraSettings.micEnabled && cameraSettings.audioRecordSource !== 'keyboard-only' && (
-              <div className="mt-2 p-2.5 rounded-lg bg-zinc-900/90 border border-white/10 flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
-                    <Mic className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Volume do Microfone na Gravação</span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-amber-400 font-bold">
-                      {Math.round((cameraSettings.micGainLevel ?? 1.0) * 100)}%
-                    </span>
-                    {(cameraSettings.micGainLevel ?? 1.0) !== 1.0 && (
-                      <button
-                        type="button"
-                        onClick={() => onUpdateCamera({ micGainLevel: 1.0 })}
-                        className="text-[10px] text-zinc-400 hover:text-amber-400 underline cursor-pointer"
-                      >
-                        Resetar 100%
-                      </button>
-                    )}
+              <div className="mt-2 p-3 rounded-xl bg-zinc-900/90 border border-white/10 flex flex-col gap-3">
+                {/* Presets Rápidos de Mixagem */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-bold text-zinc-300">Equilíbrio Rápido da Mixagem (Estúdio):</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateCamera({ micGainLevel: 1.5, keyboardRecordingGainLevel: 0.50 })}
+                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95"
+                    >
+                      🗣️ Voz em Alta
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateCamera({ micGainLevel: 1.0, keyboardRecordingGainLevel: 0.65 })}
+                      className="px-2 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-[10.5px] font-bold text-amber-300 transition text-center active:scale-95"
+                    >
+                      ⚖️ Padrão Estúdio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateCamera({ micGainLevel: 0.75, keyboardRecordingGainLevel: 0.90 })}
+                      className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-[10.5px] font-semibold text-zinc-300 hover:text-white transition text-center active:scale-95"
+                    >
+                      🎹 Piano Forte
+                    </button>
                   </div>
                 </div>
-                <input
-                  type="range"
-                  min="0.2"
-                  max="2.0"
-                  step="0.05"
-                  value={cameraSettings.micGainLevel ?? 1.0}
-                  onChange={(e) => onUpdateCamera({ micGainLevel: parseFloat(e.target.value) })}
-                  className="w-full accent-amber-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
-                />
-                <div className="flex justify-between text-[9px] text-zinc-400">
-                  <span>50%</span>
-                  <span className="text-amber-400 font-semibold">100% (Padrão Estúdio / OBS)</span>
-                  <span>150%</span>
-                  <span>200%</span>
+
+                {/* Slider 1: Volume do Microfone (Voz) */}
+                <div className="flex flex-col gap-1 pt-2 border-t border-white/5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Mic className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Volume do Microfone (Voz)</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-amber-400 font-bold">
+                        {Math.round((cameraSettings.micGainLevel ?? 1.0) * 100)}%
+                      </span>
+                      {(cameraSettings.micGainLevel ?? 1.0) !== 1.0 && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateCamera({ micGainLevel: 1.0 })}
+                          className="text-[10px] text-zinc-400 hover:text-amber-400 underline cursor-pointer"
+                        >
+                          Resetar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.4"
+                    max="3.0"
+                    step="0.05"
+                    value={cameraSettings.micGainLevel ?? 1.0}
+                    onChange={(e) => onUpdateCamera({ micGainLevel: parseFloat(e.target.value) })}
+                    className="w-full accent-amber-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-zinc-400">
+                    <span>50% (Baixo)</span>
+                    <span className="text-amber-400 font-semibold">100% (+Preamp Estúdio)</span>
+                    <span>200%</span>
+                    <span>300% (Boost Máx)</span>
+                  </div>
+                </div>
+
+                {/* Slider 2: Volume do Teclado na Gravação */}
+                <div className="flex flex-col gap-1 pt-2 border-t border-white/5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Volume do Teclado no Vídeo</span>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-cyan-400 font-bold">
+                        {Math.round((cameraSettings.keyboardRecordingGainLevel ?? 0.65) * 100)}%
+                      </span>
+                      {(cameraSettings.keyboardRecordingGainLevel ?? 0.65) !== 0.65 && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateCamera({ keyboardRecordingGainLevel: 0.65 })}
+                          className="text-[10px] text-zinc-400 hover:text-cyan-400 underline cursor-pointer"
+                        >
+                          Resetar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="1.5"
+                    step="0.05"
+                    value={cameraSettings.keyboardRecordingGainLevel ?? 0.65}
+                    onChange={(e) => onUpdateCamera({ keyboardRecordingGainLevel: parseFloat(e.target.value) })}
+                    className="w-full accent-cyan-400 h-1.5 bg-zinc-700 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[9px] text-zinc-400">
+                    <span>20% (Fundo Suave)</span>
+                    <span className="text-cyan-400 font-semibold">65% (Padrão Calibrado)</span>
+                    <span>100%</span>
+                    <span>150% (Intenso)</span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-zinc-400 bg-black/40 p-2 rounded-lg border border-white/5 leading-relaxed">
+                  🛡️ <strong>Zero Clipping / Limiter Ativo</strong>: Compressor e limiter de estúdio em tempo real garantem que o piano e a voz nunca distorçam ou saturem o áudio do vídeo, mesmo em acordes pesados.
                 </div>
               </div>
             )}

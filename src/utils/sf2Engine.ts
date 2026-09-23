@@ -45,6 +45,8 @@ interface SF2Zone {
   fineTune?: number;
   sampleModes?: number; // 0=no loop, 1=continuous loop, 3=loop while pressed
   initialAttenuation?: number; // centibels
+  pan?: number; // -500 to +500 (generator 17)
+  initialFilterFc?: number; // generator 8 (timecents or Hz)
   attackVolEnv?: number; // timecents
   holdVolEnv?: number;
   decayVolEnv?: number;
@@ -68,6 +70,8 @@ interface SF2InternalPreset {
 interface ActiveVoice {
   source: AudioBufferSourceNode;
   gain: GainNode;
+  panner?: StereoPannerNode;
+  filter?: BiquadFilterNode;
   midiNumber: number;
   startTime: number;
   releaseTimeSec: number;
@@ -325,6 +329,12 @@ class SF2EngineManager {
                   max: (amountUint16 >> 8) & 0xff,
                 };
                 break;
+              case 17: // pan (-500 to +500)
+                currentZone.pan = amountInt16;
+                break;
+              case 8: // initialFilterFc
+                currentZone.initialFilterFc = amountInt16;
+                break;
               case 48: // initialAttenuation
                 currentZone.initialAttenuation = amountInt16;
                 break;
@@ -373,6 +383,8 @@ class SF2EngineManager {
               fineTune: currentZone.fineTune ?? globalZone.fineTune ?? 0,
               sampleModes: currentZone.sampleModes ?? globalZone.sampleModes,
               initialAttenuation: currentZone.initialAttenuation ?? globalZone.initialAttenuation,
+              pan: currentZone.pan ?? globalZone.pan,
+              initialFilterFc: currentZone.initialFilterFc ?? globalZone.initialFilterFc,
               attackVolEnv: currentZone.attackVolEnv ?? globalZone.attackVolEnv,
               releaseVolEnv: currentZone.releaseVolEnv ?? globalZone.releaseVolEnv,
             });
@@ -420,12 +432,14 @@ class SF2EngineManager {
 
           let pZoneKeyRange: { min: number; max: number } | undefined;
           let pZoneVelRange: { min: number; max: number } | undefined;
+          let pZonePan: number | undefined;
           let instIndex: number | undefined;
 
           for (let genIdx = genStart; genIdx < genEnd; genIdx++) {
             const genOffset = pgenChunk.offset + genIdx * 4;
             const oper = view.getUint16(genOffset, true);
             const amountUint16 = view.getUint16(genOffset + 2, true);
+            const amountInt16 = view.getInt16(genOffset + 2, true);
 
             if (oper === 41) {
               instIndex = amountUint16;
@@ -439,12 +453,15 @@ class SF2EngineManager {
                 min: amountUint16 & 0xff,
                 max: (amountUint16 >> 8) & 0xff,
               };
+            } else if (oper === 17) {
+              pZonePan = amountInt16;
             }
           }
 
           if (instIndex === undefined) {
             if (pZoneKeyRange) presetGlobal.keyRange = pZoneKeyRange;
             if (pZoneVelRange) presetGlobal.velRange = pZoneVelRange;
+            if (pZonePan !== undefined) presetGlobal.pan = pZonePan;
           } else if (instIndex < parsedInstruments.length) {
             // Expand instrument zones into this preset
             const inst = parsedInstruments[instIndex];
@@ -463,6 +480,7 @@ class SF2EngineManager {
                   ...iz,
                   keyRange: { min: minKey, max: maxKey },
                   velRange: { min: minVel, max: maxVel },
+                  pan: pZonePan ?? iz.pan ?? presetGlobal.pan,
                   instrumentIndex: instIndex,
                 });
               }
@@ -613,29 +631,17 @@ class SF2EngineManager {
     this.stopNote(midiNumber);
 
     try {
-      // 1. Locate matching zones for this note and velocity
-      let targetZones = currentPreset.zones.filter(
+      // 1. Locate matching zones for this note
+      let keyZones = currentPreset.zones.filter(
         (z) =>
           midiNumber >= z.keyRange.min &&
           midiNumber <= z.keyRange.max &&
-          velocity >= z.velRange.min &&
-          velocity <= z.velRange.max &&
           z.sampleIndex !== undefined
       );
 
-      // Fallback A: If velocity restricted, ignore velocity filter
-      if (targetZones.length === 0) {
-        targetZones = currentPreset.zones.filter(
-          (z) =>
-            midiNumber >= z.keyRange.min &&
-            midiNumber <= z.keyRange.max &&
-            z.sampleIndex !== undefined
-        );
-      }
-
-      // Fallback B: If keyRange restricted (e.g. soundfont covers only certain octaves),
-      // pick the nearest zone by pitch so no keyboard note ever fails to sound!
-      if (targetZones.length === 0 && currentPreset.zones.length > 0) {
+      // Fallback A: If keyRange restricted (e.g. soundfont covers only certain octaves),
+      // pick the nearest zone by pitch so no keyboard note ever fails to sound
+      if (keyZones.length === 0 && currentPreset.zones.length > 0) {
         const zonesWithSamples = currentPreset.zones.filter((z) => z.sampleIndex !== undefined);
         if (zonesWithSamples.length > 0) {
           let bestZone = zonesWithSamples[0];
@@ -648,12 +654,12 @@ class SF2EngineManager {
               bestZone = z;
             }
           });
-          targetZones = [bestZone];
+          keyZones = [bestZone];
         }
       }
 
-      // Fallback C: Global sample fallback
-      if (targetZones.length === 0 && this.samples.length > 0) {
+      // Fallback B: Global sample fallback if preset has no zones
+      if (keyZones.length === 0 && this.samples.length > 0) {
         let bestSample = this.samples[0];
         let bestDist = 999;
         this.samples.forEach((s) => {
@@ -663,7 +669,7 @@ class SF2EngineManager {
             bestSample = s;
           }
         });
-        targetZones = [
+        keyZones = [
           {
             keyRange: { min: 0, max: 127 },
             velRange: { min: 0, max: 127 },
@@ -672,14 +678,83 @@ class SF2EngineManager {
         ];
       }
 
-      if (targetZones.length === 0) {
+      if (keyZones.length === 0) {
+        return false;
+      }
+
+      // 2. Velocity Layer Selection:
+      // Find zones that explicitly encompass this velocity
+      let velZones = keyZones.filter(
+        (z) => velocity >= z.velRange.min && velocity <= z.velRange.max
+      );
+
+      // If no zone covers this velocity exactly (e.g. gaps between layers or velocity out of bounds):
+      // DO NOT play all layers simultaneously! Pick the single velocity layer closest to this velocity.
+      if (velZones.length === 0) {
+        let minVelDiff = 999;
+        keyZones.forEach((z) => {
+          let diff = 0;
+          if (velocity < z.velRange.min) diff = z.velRange.min - velocity;
+          else if (velocity > z.velRange.max) diff = velocity - z.velRange.max;
+          if (diff < minVelDiff) {
+            minVelDiff = diff;
+          }
+        });
+
+        velZones = keyZones.filter((z) => {
+          let diff = 0;
+          if (velocity < z.velRange.min) diff = z.velRange.min - velocity;
+          else if (velocity > z.velRange.max) diff = velocity - z.velRange.max;
+          return Math.abs(diff - minVelDiff) <= 1;
+        });
+      }
+
+      // 3. Stereo and Mono Zone Assignment:
+      // In standard SF2 players (sforzando, Audio Evolution):
+      // - If preset has Left & Right stereo samples, play both cleanly.
+      // - If preset has Mono samples, play the single matching zone.
+      const finalZones: SF2Zone[] = [];
+      let leftZone: SF2Zone | null = null;
+      let rightZone: SF2Zone | null = null;
+      let monoZone: SF2Zone | null = null;
+
+      for (const z of velZones) {
+        if (z.sampleIndex === undefined) continue;
+        const s = this.samples.find((sample) => sample.index === z.sampleIndex);
+        if (!s) continue;
+
+        const isLeft = (s.sampleType & 0x0004) !== 0 || /[-_]l\b/i.test(s.name) || (z.pan !== undefined && z.pan <= -50);
+        const isRight = (s.sampleType & 0x0002) !== 0 || /[-_]r\b/i.test(s.name) || (z.pan !== undefined && z.pan >= 50);
+
+        if (isLeft && !leftZone) {
+          leftZone = z;
+        } else if (isRight && !rightZone) {
+          rightZone = z;
+        } else if (!isLeft && !isRight && !monoZone) {
+          monoZone = z;
+        }
+      }
+
+      if (leftZone && rightZone) {
+        finalZones.push(leftZone, rightZone);
+      } else if (leftZone) {
+        finalZones.push(leftZone);
+      } else if (rightZone) {
+        finalZones.push(rightZone);
+      } else if (monoZone) {
+        finalZones.push(monoZone);
+      } else {
+        finalZones.push(...velZones.slice(0, 2));
+      }
+
+      if (finalZones.length === 0) {
         return false;
       }
 
       const playedVoices: ActiveVoice[] = [];
       const now = ctx.currentTime;
 
-      targetZones.forEach((zone) => {
+      finalZones.forEach((zone) => {
         if (zone.sampleIndex === undefined) return;
         const sample = this.samples.find((s) => s.index === zone.sampleIndex);
         if (!sample) return;
@@ -723,29 +798,77 @@ class SF2EngineManager {
           }
         }
 
-        // Voice Gain & Envelope
+        // Voice Gain & Velocity Dynamics (SoundFont 2.04 Specification)
         const voiceGain = ctx.createGain();
 
-        // Musical velocity response curve (exponential dynamic response)
-        const normalizedVel = Math.max(0.05, Math.min(1.0, velocity / 127));
-        const velGain = Math.pow(normalizedVel, 1.25);
-        const atten = zone.initialAttenuation ? Math.pow(10, -zone.initialAttenuation / 200) : 1;
-        const peakGain = Math.min(1.0, velGain * atten * 0.9);
+        // Natural dynamic curve
+        const normVel = Math.max(0.01, Math.min(1.0, velocity / 127));
+        const velGain = Math.pow(normVel, 1.8);
 
+        // Generator initialAttenuation (centibels -> linear gain)
+        const safeAttenCB = Math.min(200, Math.max(0, zone.initialAttenuation || 0));
+        const atten = Math.pow(10, -safeAttenCB / 200);
+
+        // Clean headroom calibrated for acoustic polyphony
+        const nominalHeadroom = 0.45;
+        const peakGain = Math.min(0.85, velGain * atten * nominalHeadroom);
+
+        // Volume Envelope (Attack, Decay to Sustain body, Release on key-up)
         const attackSec = timecentsToSeconds(zone.attackVolEnv, 0.003);
-        const releaseSec = timecentsToSeconds(zone.releaseVolEnv, 0.28);
+        const decaySec = timecentsToSeconds(zone.decayVolEnv, 4.5);
+        const releaseSec = timecentsToSeconds(zone.releaseVolEnv, 0.32);
 
+        // In SoundFont 2.04: sustainVolEnv is in centibels of attenuation from peak
+        let sustainGain: number;
+        if (zone.sustainVolEnv !== undefined && zone.sustainVolEnv > 0) {
+          sustainGain = Math.max(0.0001, peakGain * Math.pow(10, -Math.min(1000, zone.sustainVolEnv) / 200));
+        } else if (!isLoop) {
+          // One-shot unlooped sample: natural decay
+          sustainGain = peakGain * 0.7;
+        } else {
+          // Looped sample: natural acoustic decay down to 25% body sustain
+          sustainGain = peakGain * 0.25;
+        }
+
+        // Attack ramp
         voiceGain.gain.setValueAtTime(0.0001, now);
         voiceGain.gain.linearRampToValueAtTime(Math.max(0.001, peakGain), now + attackSec);
+        // Smooth exponential target decay into sustain level
+        voiceGain.gain.setTargetAtTime(sustainGain, now + attackSec, Math.max(0.2, decaySec / 3));
 
+        // Stereo Panning (Respects SF2 pan or sample channel, zero artificial spread)
+        let panner: StereoPannerNode | undefined;
+        if (ctx.createStereoPanner) {
+          panner = ctx.createStereoPanner();
+          const isLeft = (sample.sampleType & 0x0004) !== 0 || /[-_]l\b/i.test(sample.name) || (zone.pan !== undefined && zone.pan <= -50);
+          const isRight = (sample.sampleType & 0x0002) !== 0 || /[-_]r\b/i.test(sample.name) || (zone.pan !== undefined && zone.pan >= 50);
+
+          if (zone.pan !== undefined) {
+            panner.pan.setValueAtTime(Math.max(-1, Math.min(1, zone.pan / 1000)), now);
+          } else if (isLeft) {
+            panner.pan.setValueAtTime(-0.8, now);
+          } else if (isRight) {
+            panner.pan.setValueAtTime(0.8, now);
+          } else {
+            panner.pan.setValueAtTime(0, now);
+          }
+        }
+
+        // Direct pristine audio graph (DAW style): source -> voiceGain -> [panner] -> destination
         source.connect(voiceGain);
-        voiceGain.connect(destination);
+        if (panner) {
+          voiceGain.connect(panner);
+          panner.connect(destination);
+        } else {
+          voiceGain.connect(destination);
+        }
 
         source.start(now);
 
         playedVoices.push({
           source,
           gain: voiceGain,
+          panner,
           midiNumber,
           startTime: now,
           releaseTimeSec: releaseSec,
@@ -765,7 +888,7 @@ class SF2EngineManager {
   }
 
   /**
-   * Release MIDI note with smooth envelope fade-out
+   * Release MIDI note with smooth envelope fade-out (no pops or clicks)
    */
   public stopNote(midiNumber: number, ctx?: AudioContext) {
     const voices = this.activeVoices.get(midiNumber);
@@ -774,21 +897,23 @@ class SF2EngineManager {
     voices.forEach((voice) => {
       try {
         const now = ctx ? ctx.currentTime : voice.gain.context.currentTime;
-        const releaseTime = voice.releaseTimeSec || 0.25;
+        const releaseTime = voice.releaseTimeSec || 0.28;
 
         voice.gain.gain.cancelScheduledValues(now);
-        voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-        voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + releaseTime);
+        // Smooth exponential target decay - completely pop-free and click-free
+        voice.gain.gain.setTargetAtTime(0, now, Math.max(0.02, releaseTime / 3.5));
 
         setTimeout(() => {
           try {
             voice.source.stop();
             voice.source.disconnect();
+            if (voice.filter) voice.filter.disconnect();
+            if (voice.panner) voice.panner.disconnect();
             voice.gain.disconnect();
           } catch {
             // Already closed
           }
-        }, releaseTime * 1000 + 40);
+        }, releaseTime * 1000 + 80);
       } catch {
         // Voice already disconnected
       }
@@ -803,6 +928,8 @@ class SF2EngineManager {
         try {
           voice.source.stop();
           voice.source.disconnect();
+          if (voice.filter) voice.filter.disconnect();
+          if (voice.panner) voice.panner.disconnect();
           voice.gain.disconnect();
         } catch {
           // ignore

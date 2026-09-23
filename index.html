@@ -20,6 +20,38 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <script>
+      // Emscripten Module pre-initialization for FluidSynth WASM
+      var Module = window.Module = window.Module || {};
+      window.Module.calledRun = false;
+      window.__fluidsynth_ready_promise = new Promise(function(resolve) {
+        var checkReady = function() {
+          var m = window.Module;
+          if (m && (m.calledRun || (typeof m.addFunction === 'function' && typeof m.cwrap === 'function'))) {
+            m.isReady = true;
+            resolve(m);
+            return true;
+          }
+          return false;
+        };
+        window.__onWasmReady = function(mod) {
+          resolve(mod || window.Module);
+        };
+        var prevOnRuntimeInitialized = window.Module.onRuntimeInitialized;
+        window.Module.onRuntimeInitialized = function() {
+          if (typeof prevOnRuntimeInitialized === 'function') {
+            try { prevOnRuntimeInitialized(); } catch(e) {}
+          }
+          window.Module.calledRun = true;
+          window.Module.isReady = true;
+          console.log('[FluidSynth WASM] onRuntimeInitialized fired, WASM module fully ready');
+          resolve(window.Module);
+        };
+        if (checkReady()) return;
+      });
+    </script>
+    <script src="/fluidsynth/libfluidsynth-2.4.6.js"></script>
+    <script src="/fluidsynth/js-synthesizer.js"></script>
   </head>
   <body class="bg-black text-white antialiased overflow-hidden select-none">
     <div id="root"></div>

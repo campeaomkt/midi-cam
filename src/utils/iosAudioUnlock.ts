@@ -77,7 +77,7 @@ export async function unlockAudioContext(ctx: AudioContext): Promise<boolean> {
 }
 
 /**
- * Setup global user interaction listener to auto-unlock on first tap anywhere
+ * Setup global user interaction listener to auto-unlock on first tap or desktop interaction
  */
 export function setupAutoUnlock(getAudioContext: () => AudioContext | null) {
   if (typeof window === 'undefined') return;
@@ -87,14 +87,14 @@ export function setupAutoUnlock(getAudioContext: () => AudioContext | null) {
     if (ctx) {
       unlockAudioContext(ctx);
       if (ctx.state === 'running') {
-        window.removeEventListener('pointerdown', handleInteraction, true);
-        window.removeEventListener('touchstart', handleInteraction, true);
-        window.removeEventListener('keydown', handleInteraction, true);
+        ['pointerdown', 'touchstart', 'mousedown', 'keydown', 'click', 'focus', 'mousemove'].forEach(
+          (evt) => window.removeEventListener(evt, handleInteraction, true)
+        );
       }
     }
   };
 
-  window.addEventListener('pointerdown', handleInteraction, true);
-  window.addEventListener('touchstart', handleInteraction, true);
-  window.addEventListener('keydown', handleInteraction, true);
+  ['pointerdown', 'touchstart', 'mousedown', 'keydown', 'click', 'focus', 'mousemove'].forEach((evt) => {
+    window.addEventListener(evt, handleInteraction, { capture: true, passive: true });
+  });
 }

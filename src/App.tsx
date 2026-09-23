@@ -28,9 +28,7 @@ import { RecordedVideosModal } from './components/RecordedVideosModal';
 import { SoundFontManagerModal } from './components/SoundFontManagerModal';
 import { WifiMidiSyncModal } from './components/WifiMidiSyncModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { sf2Engine } from './utils/sf2Engine';
-import { loadSoundFontFromStorage } from './utils/sf2Storage';
-import { timbreEngine } from './utils/timbreEngine';
+import { SoundFontEngine } from './audio/SoundFontEngine';
 import { wifiMidiBridge } from './utils/wifiMidiBridge';
 import { useMediaDevices } from './hooks/useMediaDevices';
 
@@ -50,7 +48,8 @@ export default function App() {
     recordingMode: 'overlay', // Default to Overlay so keyboard, animated keys and chords are burned into the recorded video
     aspectRatio: '9:16', // Default 9:16 vertical ratio for Reels/TikTok/Shorts
     audioRecordSource: 'keyboard-and-mic', // Default to Keyboard + Mic so voice is recorded seamlessly when mic is active
-    micGainLevel: 1.0,
+    micGainLevel: 1.0, // Default 1.0 (with 2.5x base studio vocal preamp)
+    keyboardRecordingGainLevel: 0.65, // Studio keyboard mix balance (prevents clipping and drowning out voice)
   });
 
   // Virtual Keyboard & Overlay Configuration (matches uploaded screenshot)
@@ -113,7 +112,7 @@ export default function App() {
     wifiMidiBridge.getStatus()
   );
   const [activeSoundFontName, setActiveSoundFontName] = useState<string>(() =>
-    timbreEngine.getActiveTimbreName()
+    SoundFontEngine.getActiveBankName()
   );
 
   // Subscribe to Wi-Fi MIDI Sync Bridge
@@ -145,47 +144,16 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const handleSoundFontChanged = useCallback(() => {
-    if (timbreEngine.getMode() === 'custom_sf2' && sf2Engine.getIsLoaded()) {
-      const preset = sf2Engine.getActivePreset();
-      const sfName = sf2Engine.getSoundFontName();
-      setActiveSoundFontName(preset ? `${sfName} (${preset.name})` : sfName);
-    } else {
-      setActiveSoundFontName(timbreEngine.getActiveTimbreName());
-    }
+    setActiveSoundFontName(SoundFontEngine.getActiveBankName());
   }, []);
 
-  // Sync with timbre engine changes
+  // Sync with SoundFontEngine changes
   useEffect(() => {
-    const unsub = timbreEngine.subscribe(() => {
+    const unsub = SoundFontEngine.subscribe(() => {
       handleSoundFontChanged();
     });
     return unsub;
   }, [handleSoundFontChanged]);
-
-  // Restore saved SF2 SoundFont from local device storage on app startup
-  useEffect(() => {
-    const restoreSavedSoundFont = async () => {
-      try {
-        const stored = await loadSoundFontFromStorage();
-        if (stored && stored.buffer) {
-          await sf2Engine.loadBuffer(stored.buffer, stored.name);
-          if (stored.activePresetIndex > 0) {
-            sf2Engine.selectPreset(stored.activePresetIndex);
-          }
-          if (timbreEngine.getMode() === 'custom_sf2') {
-            const preset = sf2Engine.getActivePreset();
-            setActiveSoundFontName(
-              preset ? `${sf2Engine.getSoundFontName()} (${preset.name})` : sf2Engine.getSoundFontName()
-            );
-          }
-        }
-      } catch (err) {
-        console.warn('Could not restore saved SoundFont from storage:', err);
-      }
-    };
-
-    restoreSavedSoundFont();
-  }, []);
 
   // Get active filter object
   const activeFilter: FilterPreset = useMemo(() => {
@@ -216,6 +184,61 @@ export default function App() {
     }
   }, [currentChord]);
 
+  // Keep live reference of keyboardSettings for MIDI event handlers
+  const keyboardSettingsRef = useRef<KeyboardSettings>(keyboardSettings);
+  useEffect(() => {
+    keyboardSettingsRef.current = keyboardSettings;
+  }, [keyboardSettings]);
+
+  // Helper to adjust MIDI velocity according to the user's velocityCurve preset
+  const applyVelocityCurve = useCallback((rawVel: number, curve?: 'natural' | 'soft' | 'hard' | 'fixed'): number => {
+    // Fixed mode: identical to the mouse click (velocity 95)
+    if (curve === 'fixed') return 95;
+
+    if (curve === 'soft') {
+      // Sensível / Mini Teclados: eleva toques muito leves para volume encorpado
+      const norm = Math.max(0.01, Math.min(1.0, rawVel / 127));
+      return Math.min(127, Math.round((0.25 + 0.75 * Math.pow(norm, 0.75)) * 127));
+    }
+
+    if (curve === 'hard') {
+      // Resposta linear direta 1:1 para teclados com teclas pesadas de martelo (Hammer Action)
+      return rawVel;
+    }
+
+    // 'natural' (Padrão Calibrado para Estúdio):
+    // Transforma toques médios no ponto de equilíbrio doce e aveludado (80-95, exatamente como o clique do mouse).
+    // Evita que toques normais disparem a camada fortissimo agressiva, preservando a acústica pura do SF2.
+    const norm = Math.max(0.01, Math.min(1.0, rawVel / 127));
+    const mapped = Math.pow(norm, 1.28) * 127;
+    return Math.max(1, Math.min(127, Math.round(mapped)));
+  }, []);
+
+  // Auto-detect real physical webcam if selected is missing or currently pointing to a virtual device like Iriun or OBS
+  useEffect(() => {
+    if (cameras.length > 0) {
+      const isCurrentVirtual = cameraSettings.selectedVideoDeviceId
+        ? cameras.some((c) => c.deviceId === cameraSettings.selectedVideoDeviceId && /iriun|obs|droidcam|virtual|vcam/i.test(c.label || ''))
+        : false;
+
+      if (!cameraSettings.selectedVideoDeviceId || isCurrentVirtual) {
+        const physicalCam = cameras.find((c) => !/iriun|obs|droidcam|virtual|vcam/i.test(c.label || ''));
+        if (physicalCam) {
+          console.log('Preferring physical webcam over virtual device:', physicalCam.label);
+          setCameraSettings((prev) => ({
+            ...prev,
+            selectedVideoDeviceId: physicalCam.deviceId,
+          }));
+        }
+      }
+    }
+  }, [cameras, cameraSettings.selectedVideoDeviceId]);
+
+  // Eagerly initialize audio context
+  useEffect(() => {
+    audioSynth.initContext();
+  }, []);
+
   // Sync synth volume & mute
   useEffect(() => {
     audioSynth.setVolume(keyboardSettings.synthVolume);
@@ -226,14 +249,16 @@ export default function App() {
   useEffect(() => {
     const unsubNoteOn = midiManager.onNoteOn((note, velocity) => {
       setActiveNotes((prev) => (prev.includes(note) ? prev : [...prev, note]));
-      if (keyboardSettings.soundEnabled) {
-        audioSynth.startNote(note, velocity);
+      const currentKbd = keyboardSettingsRef.current;
+      if (currentKbd.soundEnabled) {
+        const adjustedVel = applyVelocityCurve(velocity, currentKbd.velocityCurve || 'natural');
+        audioSynth.startNote(note, adjustedVel);
       }
     });
 
     const unsubNoteOff = midiManager.onNoteOff((note) => {
       setActiveNotes((prev) => prev.filter((n) => n !== note));
-      if (keyboardSettings.soundEnabled) {
+      if (keyboardSettingsRef.current.soundEnabled) {
         audioSynth.stopNote(note);
       }
     });
@@ -316,12 +341,25 @@ export default function App() {
     }
   };
 
-  // Flip Camera between User & Environment
+  // Flip Camera between User & Environment, or cycle cameras if multiple are present
   const handleFlipCamera = () => {
-    setCameraSettings((prev) => ({
-      ...prev,
-      facingMode: prev.facingMode === 'user' ? 'environment' : 'user',
-    }));
+    if (cameras && cameras.length > 1) {
+      const currentIndex = cameras.findIndex(
+        (c) => c.deviceId === cameraSettings.selectedVideoDeviceId
+      );
+      const nextIndex = (currentIndex + 1) % cameras.length;
+      const nextCam = cameras[nextIndex];
+      setCameraSettings((prev) => ({
+        ...prev,
+        selectedVideoDeviceId: nextCam.deviceId,
+        facingMode: prev.facingMode === 'user' ? 'environment' : 'user',
+      }));
+    } else {
+      setCameraSettings((prev) => ({
+        ...prev,
+        facingMode: prev.facingMode === 'user' ? 'environment' : 'user',
+      }));
+    }
   };
 
   // Video Recording Lifecycle
@@ -353,22 +391,24 @@ export default function App() {
       let micStream: MediaStream | null = null;
       if (shouldRecordMic) {
         try {
-          // Attempt high-fidelity musical audio capture with echoCancellation: false
-          // so browser AEC does not chop/duck/garble voice when piano notes play out of speakers
+          // Standard high-quality voice capture with autoGainControl enabled
+          // This ensures webcam and mobile microphones achieve healthy nominal levels
           micStream = await navigator.mediaDevices.getUserMedia({
             audio: cameraSettings.selectedAudioDeviceId
               ? {
                   deviceId: { exact: cameraSettings.selectedAudioDeviceId },
-                  echoCancellation: false,
-                  autoGainControl: false,
+                  autoGainControl: true,
+                  noiseSuppression: true,
+                  echoCancellation: true,
                 }
               : {
-                  echoCancellation: false,
-                  autoGainControl: false,
+                  autoGainControl: true,
+                  noiseSuppression: true,
+                  echoCancellation: true,
                 },
           });
         } catch (aecErr) {
-          console.warn('Tentativa com restrições musicais falhou, tentando padrão com deviceId...', aecErr);
+          console.warn('Tentativa com AGC falhou, tentando padrão com deviceId...', aecErr);
           try {
             micStream = await navigator.mediaDevices.getUserMedia({
               audio: cameraSettings.selectedAudioDeviceId
@@ -386,7 +426,12 @@ export default function App() {
       }
 
       const micGain = cameraSettings.micGainLevel !== undefined ? cameraSettings.micGainLevel : 1.0;
-      const { stream: recAudioStream, cleanup: audioCleanup } = audioSynth.getRecordingAudioStream(micStream, micGain);
+      const keyboardGain = cameraSettings.keyboardRecordingGainLevel !== undefined ? cameraSettings.keyboardRecordingGainLevel : 0.65;
+      const { stream: recAudioStream, cleanup: audioCleanup } = audioSynth.getRecordingAudioStream(
+        micStream,
+        micGain,
+        keyboardGain
+      );
       recordingAudioCleanupRef.current = audioCleanup;
 
       const audioTracks = recAudioStream.getAudioTracks();
@@ -525,6 +570,8 @@ export default function App() {
             activeSoundFontName={activeSoundFontName}
             isSustainActive={isSustainActive}
             wifiSyncStatus={wifiSyncStatus}
+            cameras={cameras}
+            onFlipCamera={handleFlipCamera}
             onOpenWifiSync={() => setIsWifiSyncOpen(true)}
             onToggleSustain={handleToggleSustain}
             onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}

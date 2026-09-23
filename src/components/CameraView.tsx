@@ -3,8 +3,9 @@ import { CameraSettings, FilterPreset, KeyboardSettings, DetectedChord } from '.
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { ChordDisplay } from './ChordDisplay';
 import { getCombinedFilterStyle } from '../utils/filterPresets';
-import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone, Play } from 'lucide-react';
+import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone, Play, Video } from 'lucide-react';
 import { IOSPermissionGuideModal } from './IOSPermissionGuideModal';
+import { wifiMidiBridge } from '../utils/wifiMidiBridge';
 
 interface CameraViewProps {
   cameraSettings: CameraSettings;
@@ -53,6 +54,19 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const [isIOSGuideOpen, setIsIOSGuideOpen] = useState<boolean>(false);
   const [isAttempting, setIsAttempting] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Remote Mobile Camera over Wi-Fi (Modo Iriun Webcam)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(() => wifiMidiBridge.getRemoteCameraStream());
+  const [useRemoteCamera, setUseRemoteCamera] = useState<boolean>(true);
+
+  // Subscribe to incoming remote video streams from mobile device
+  useEffect(() => {
+    const unsub = wifiMidiBridge.subscribeRemoteStream((rStream) => {
+      console.log('[CameraView] Remote camera stream changed:', !!rStream);
+      setRemoteStream(rStream);
+    });
+    return unsub;
+  }, []);
 
   // Detect iOS WebKit environment
   const isIOS =
@@ -109,20 +123,51 @@ export const CameraView: React.FC<CameraViewProps> = ({
       }
     }
 
+    // Step 0.5: On PC / Desktop (e.g. Tauri / Windows WebView), if no device was explicitly chosen,
+    // enumerate devices and prioritize real physical webcams over disconnected virtual devices (like Iriun or OBS)
+    if (!mediaStream && !cameraSettings.selectedVideoDeviceId && navigator.mediaDevices.enumerateDevices) {
+      try {
+        const devList = await navigator.mediaDevices.enumerateDevices();
+        const videoDevs = devList.filter((d) => d.kind === 'videoinput');
+        if (videoDevs.length > 0) {
+          // Look for a real physical webcam (ignoring virtual drivers like Iriun, OBS, DroidCam, etc.)
+          const physicalCam = videoDevs.find((d) => {
+            const lbl = (d.label || '').toLowerCase();
+            return !lbl.includes('iriun') && !lbl.includes('obs') && !lbl.includes('droidcam') && !lbl.includes('virtual') && !lbl.includes('vcam');
+          });
+
+          if (physicalCam && physicalCam.deviceId) {
+            try {
+              mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  deviceId: { ideal: physicalCam.deviceId },
+                  width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+                  height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+                },
+                audio: false,
+              });
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
     // Step 1: Standard mobile constraints with ideal facingMode
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: cameraSettings.facingMode },
-          width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
-          height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
-        },
-        audio: false,
-      };
-      mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-    } catch (err1: any) {
-      lastErrorMsg = err1?.message || 'Falha ao solicitar resolução ideal';
-      console.warn('Strategy 1 failed, trying 720p...', err1);
+    if (!mediaStream) {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: { ideal: cameraSettings.facingMode },
+            width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+            height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+          },
+          audio: false,
+        };
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err1: any) {
+        lastErrorMsg = err1?.message || 'Falha ao solicitar resolução ideal';
+        console.warn('Strategy 1 failed, trying 720p...', err1);
+      }
     }
 
     // Step 2: 720p fallback
@@ -266,17 +311,28 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [stream, videoRef]);
 
-  // Initialize camera on mount and when facing mode changes
+  // Initialize camera or swap to remote mobile stream
   useEffect(() => {
-    initCamera();
+    if (remoteStream && useRemoteCamera) {
+      console.log('[CameraView] Active stream set to Remote Mobile Camera');
+      if (streamRef.current && streamRef.current !== remoteStream) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      streamRef.current = remoteStream;
+      setStream(remoteStream);
+      setHasPermission(true);
+      setCameraError(null);
+    } else {
+      initCamera();
+    }
 
     return () => {
-      if (streamRef.current) {
+      if (streamRef.current && streamRef.current !== remoteStream) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       }
     };
-  }, [initCamera]);
+  }, [remoteStream, useRemoteCamera, initCamera]);
 
   // Combined CSS filter string
   const cssFilterValue = getCombinedFilterStyle(activeFilter, filterAdjustments);
@@ -588,6 +644,46 @@ export const CameraView: React.FC<CameraViewProps> = ({
               </div>
             )}
           </div>
+        </div>
+      )}
+      {/* Remote Camera Stream Indicator / Mode Switcher */}
+      {remoteStream && useRemoteCamera && (
+        <div className="absolute top-3 left-3 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-500/60 text-cyan-300 text-xs font-semibold shadow-[0_0_15px_rgba(6,182,212,0.4)] animate-fade-in pointer-events-auto">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+          </span>
+          <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Câmera Celular (Wi-Fi 60 FPS)</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setUseRemoteCamera(false);
+            }}
+            className="ml-1 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] text-zinc-300 hover:text-white transition cursor-pointer"
+            title="Usar webcam do PC"
+          >
+            Webcam PC
+          </button>
+        </div>
+      )}
+
+      {remoteStream && !useRemoteCamera && (
+        <div className="absolute top-3 left-3 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/85 backdrop-blur-md border border-zinc-700 text-zinc-300 text-xs font-semibold shadow-lg animate-fade-in pointer-events-auto">
+          <Camera className="w-3.5 h-3.5 text-amber-400" />
+          <span>Webcam Local PC</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setUseRemoteCamera(true);
+            }}
+            className="ml-1 px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-[10px] text-cyan-300 font-bold transition cursor-pointer"
+            title="Alternar para a câmera remota do celular"
+          >
+            Espelhar Celular
+          </button>
         </div>
       )}
     </div>
