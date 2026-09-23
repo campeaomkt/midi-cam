@@ -256,8 +256,12 @@ export class WebFluidSynth {
     try {
       // Direct gain scaling
       this.synth.setGain(this.currentGain);
-      // High-quality cubic/4th-order sample interpolation without coloring timbre
-      this.synth.setInterpolation(4);
+      // High-quality cubic/4th-order sample interpolation (enum 2 = FLUID_INTERP_4THORDER)
+      try {
+        if (typeof (this.synth as any).setInterpolation === 'function') {
+          (this.synth as any).setInterpolation(2);
+        }
+      } catch {}
       // Disable artificial reverb so the soundfont plays 100% dry and natural, exactly as designed (standard DAW behavior)
       (this.synth as any).setReverbOn?.(false);
     } catch (e) {

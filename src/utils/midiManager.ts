@@ -2,8 +2,8 @@ import { MidiDevice } from '../types';
 import { SoundFontEngine } from '../audio/SoundFontEngine';
 import { audioSynth } from './audioSynth';
 
-export type NoteCallback = (midiNumber: number, velocity: number) => void;
-export type NoteOffCallback = (midiNumber: number) => void;
+export type NoteCallback = (midiNumber: number, velocity: number, isRemoteSync?: boolean) => void;
+export type NoteOffCallback = (midiNumber: number, isRemoteSync?: boolean) => void;
 export type DevicesCallback = (devices: MidiDevice[]) => void;
 export type SustainCallback = (active: boolean) => void;
 
@@ -166,14 +166,14 @@ class MidiManager {
     this.notifySustainListeners(false);
   }
 
-  private handleNoteOn(note: number, velocity: number) {
+  private handleNoteOn(note: number, velocity: number, isRemoteSync = false) {
     this.heldKeys.add(note);
-    this.notifyNoteOn(note, velocity);
+    this.notifyNoteOn(note, velocity, isRemoteSync);
   }
 
-  private handleNoteOff(note: number) {
+  private handleNoteOff(note: number, isRemoteSync = false) {
     this.heldKeys.delete(note);
-    this.notifyNoteOff(note);
+    this.notifyNoteOff(note, isRemoteSync);
   }
 
   public onNoteOn(cb: NoteCallback): () => void {
@@ -198,20 +198,20 @@ class MidiManager {
     return () => this.sustainListeners.delete(cb);
   }
 
-  public triggerNoteOn(note: number, velocity: number = 100) {
-    this.handleNoteOn(note, velocity);
+  public triggerNoteOn(note: number, velocity: number = 100, isRemoteSync = false) {
+    this.handleNoteOn(note, velocity, isRemoteSync);
   }
 
-  public triggerNoteOff(note: number) {
-    this.handleNoteOff(note);
+  public triggerNoteOff(note: number, isRemoteSync = false) {
+    this.handleNoteOff(note, isRemoteSync);
   }
 
-  private notifyNoteOn(note: number, velocity: number) {
-    this.noteOnListeners.forEach((cb) => cb(note, velocity));
+  private notifyNoteOn(note: number, velocity: number, isRemoteSync = false) {
+    this.noteOnListeners.forEach((cb) => cb(note, velocity, isRemoteSync));
   }
 
-  private notifyNoteOff(note: number) {
-    this.noteOffListeners.forEach((cb) => cb(note));
+  private notifyNoteOff(note: number, isRemoteSync = false) {
+    this.noteOffListeners.forEach((cb) => cb(note, isRemoteSync));
   }
 
   private notifyDevicesListeners() {

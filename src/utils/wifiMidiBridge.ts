@@ -258,7 +258,8 @@ class WifiMidiBridge {
     this.unbindMidiListeners = [];
 
     // Broadcast Note On
-    const unbindNoteOn = midiManager.onNoteOn((note, velocity) => {
+    const unbindNoteOn = midiManager.onNoteOn((note, velocity, isRemoteSync) => {
+      if (isRemoteSync) return; // Never bounce back notes received over Wi-Fi
       this.lastActiveTimestamp = Date.now();
       this.broadcastMessage({
         type: 'noteOn',
@@ -269,7 +270,8 @@ class WifiMidiBridge {
     });
 
     // Broadcast Note Off
-    const unbindNoteOff = midiManager.onNoteOff((note) => {
+    const unbindNoteOff = midiManager.onNoteOff((note, isRemoteSync) => {
+      if (isRemoteSync) return;
       this.lastActiveTimestamp = Date.now();
       this.broadcastMessage({
         type: 'noteOff',
@@ -362,9 +364,9 @@ class WifiMidiBridge {
             if (!msg) return;
 
             if (msg.type === 'noteOn') {
-              midiManager.triggerNoteOn(msg.note, msg.velocity);
+              midiManager.triggerNoteOn(msg.note, msg.velocity, true);
             } else if (msg.type === 'noteOff') {
-              midiManager.triggerNoteOff(msg.note);
+              midiManager.triggerNoteOff(msg.note, true);
             } else if (msg.type === 'sustain') {
               midiManager.setSustain(msg.active);
             } else if (msg.type === 'pong') {
@@ -462,6 +464,13 @@ class WifiMidiBridge {
 
     const onStreamReady = (remoteStream: MediaStream) => {
       console.log('[WiFi Bridge] Remote camera stream received! Tracks:', remoteStream.getTracks().length);
+      // Ensure any audio track on the remote camera feed is disabled and stopped so it never interferes with PC audio
+      remoteStream.getAudioTracks().forEach((track) => {
+        try {
+          track.enabled = false;
+          track.stop();
+        } catch {}
+      });
       remoteStream.getVideoTracks().forEach((track) => {
         track.enabled = true;
       });
@@ -480,6 +489,12 @@ class WifiMidiBridge {
       const pc: RTCPeerConnection = call.peerConnection;
       if (pc) {
         pc.ontrack = (event: RTCTrackEvent) => {
+          if (event.track.kind === 'audio') {
+            try {
+              event.track.stop();
+            } catch {}
+            return;
+          }
           console.log('[WiFi Bridge] RTCPeerConnection ontrack event:', event.track.kind);
           const s = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
           onStreamReady(s);

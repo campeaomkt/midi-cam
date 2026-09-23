@@ -248,16 +248,29 @@ export default function App() {
 
   // Setup MIDI & Sustain Listeners
   useEffect(() => {
-    const unsubNoteOn = midiManager.onNoteOn((note, velocity) => {
+    const unsubNoteOn = midiManager.onNoteOn((note, velocity, isRemoteSync) => {
+      // 1. Always illuminate keys and show chords on screen
       setActiveNotes((prev) => (prev.includes(note) ? prev : [...prev, note]));
+
+      // 2. CRITICAL: When notes are received over Wi-Fi remote sync (e.g. mobile camera connected to PC),
+      // do NOT play audio through the phone speaker!
+      // The PC host is where the instrument is connected and where high-resolution audio is playing.
+      // Playing through the phone speaker creates an awful tinny, out-of-phase toy keyboard sound.
+      if (isRemoteSync) {
+        return;
+      }
+
       if (keyboardSettingsRef.current.soundEnabled) {
         // Natural 1:1 hardware MIDI velocity straight from controller, identical to any standard DAW
         audioSynth.startNote(note, velocity);
       }
     });
 
-    const unsubNoteOff = midiManager.onNoteOff((note) => {
+    const unsubNoteOff = midiManager.onNoteOff((note, isRemoteSync) => {
       setActiveNotes((prev) => prev.filter((n) => n !== note));
+      if (isRemoteSync) {
+        return;
+      }
       if (keyboardSettingsRef.current.soundEnabled) {
         audioSynth.stopNote(note);
       }
