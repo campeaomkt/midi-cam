@@ -1,6 +1,7 @@
 import { Peer, DataConnection, MediaConnection } from 'peerjs';
 import { midiManager } from './midiManager';
 import { WifiSyncMode, WifiSyncStatus } from '../types';
+import { findUltraWideCamera, findMainBackCamera, applyHardwareZoom } from './cameraLenses';
 
 export type WifiSyncMessage =
   | { type: 'noteOn'; note: number; velocity: number; timestamp?: number }
@@ -9,9 +10,11 @@ export type WifiSyncMessage =
   | { type: 'ping'; time: number }
   | { type: 'pong'; time: number }
   | { type: 'deviceInfo'; name: string; devices?: string[] }
-  | { type: 'cameraStreamState'; isStreaming: boolean; facingMode?: string; resolution?: string }
-  | { type: 'requestStartCamera'; facingMode?: 'environment' | 'user'; resolution?: '1080P' | '720P' }
-  | { type: 'requestStopCamera' };
+  | { type: 'cameraStreamState'; isStreaming: boolean; facingMode?: string; resolution?: string; isUltraWide?: boolean }
+  | { type: 'requestStartCamera'; facingMode?: 'environment' | 'user'; resolution?: '1080P' | '720P'; targetZoom?: number }
+  | { type: 'requestStopCamera' }
+  | { type: 'setRemoteZoom'; zoom: number }
+  | { type: 'requestSwitchLens'; lens: 'ultra-wide' | 'main' };
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -46,6 +49,7 @@ class WifiMidiBridge {
   private activeMediaCall: MediaConnection | null = null;
   private isStreamingCameraFlag: boolean = false;
   private remoteStreamListeners: Set<(stream: MediaStream | null) => void> = new Set();
+  private localStreamListeners: Set<(stream: MediaStream | null) => void> = new Set();
 
   constructor() {
     // If URL has ?sync=CODE parameter on load, we will expose a helper to auto-connect
@@ -219,9 +223,22 @@ class WifiMidiBridge {
           this.notify();
         }
       } else if (msg && msg.type === 'requestStartCamera') {
-        this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P');
+        this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P', msg.targetZoom);
       } else if (msg && msg.type === 'requestStopCamera') {
         this.stopCameraStream();
+      } else if (msg && msg.type === 'setRemoteZoom') {
+        if (this.isStreamingCameraFlag) {
+          if (msg.zoom === 0.5) {
+            this.switchLens('ultra-wide');
+          } else {
+            this.switchLens('main');
+            applyHardwareZoom(this.localCameraStream?.getVideoTracks()[0], msg.zoom);
+          }
+        }
+      } else if (msg && msg.type === 'requestSwitchLens') {
+        if (this.isStreamingCameraFlag) {
+          this.switchLens(msg.lens);
+        }
       }
     });
 
@@ -366,9 +383,22 @@ class WifiMidiBridge {
                 this.notify();
               }
             } else if (msg.type === 'requestStartCamera') {
-              this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P');
+              this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P', msg.targetZoom);
             } else if (msg.type === 'requestStopCamera') {
               this.stopCameraStream();
+            } else if (msg.type === 'setRemoteZoom') {
+              if (this.isStreamingCameraFlag) {
+                if (msg.zoom === 0.5) {
+                  this.switchLens('ultra-wide');
+                } else {
+                  this.switchLens('main');
+                  applyHardwareZoom(this.localCameraStream?.getVideoTracks()[0], msg.zoom);
+                }
+              }
+            } else if (msg.type === 'requestSwitchLens') {
+              if (this.isStreamingCameraFlag) {
+                this.switchLens(msg.lens);
+              }
             }
           });
 
@@ -483,10 +513,12 @@ class WifiMidiBridge {
   /**
    * INICIAR TRANSMISSÃO DA CÂMERA DO CELULAR PARA O PC (Modo Iriun Webcam)
    * Captura a câmera do celular em tempo real e transmite via WebRTC P2P para o PC
+   * Notifica a interface local do celular para continuar exibindo o vídeo sem tela preta
    */
   public async startCameraStream(
     facingMode: 'environment' | 'user' = 'environment',
-    resolution: '1080P' | '720P' = '1080P'
+    resolution: '1080P' | '720P' = '1080P',
+    targetZoom?: number
   ): Promise<{ success: boolean; stream?: MediaStream; error?: string }> {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return { success: false, error: 'Câmera não suportada neste dispositivo.' };
@@ -503,28 +535,57 @@ class WifiMidiBridge {
       const heightIdeal = resolution === '720P' ? 720 : 1080;
 
       let stream: MediaStream | null = null;
-      // 1. Try High-resolution 60fps
+
+      // Se o zoom solicitado for 0.5x, tenta selecionar a câmera Ultra-Wide nativa do iPhone / Android
+      let ultraWideDeviceId: string | null = null;
+      if (targetZoom === 0.5 && facingMode === 'environment') {
+        const ultra = await findUltraWideCamera();
+        if (ultra) {
+          ultraWideDeviceId = ultra.deviceId;
+          console.log('[WiFi Camera] Using native Ultra Wide camera:', ultra.label);
+        }
+      }
+
+      // 1. Try High-resolution 60fps with ultra-wide if selected
       try {
+        const videoConstraints: MediaTrackConstraints = ultraWideDeviceId
+          ? {
+              deviceId: { exact: ultraWideDeviceId },
+              width: { ideal: widthIdeal },
+              height: { ideal: heightIdeal },
+              frameRate: { ideal: 60, max: 60 },
+            }
+          : {
+              facingMode: { ideal: facingMode },
+              width: { ideal: widthIdeal },
+              height: { ideal: heightIdeal },
+              frameRate: { ideal: 60, max: 60 },
+            };
+
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: widthIdeal },
-            height: { ideal: heightIdeal },
-            frameRate: { ideal: 60, max: 60 },
-          },
+          video: videoConstraints,
           audio: false,
         });
       } catch (e1) {
         console.warn('[WiFi Camera] 60fps failed, falling back to 30fps', e1);
         // 2. Try High-resolution 30fps
         try {
+          const videoConstraints: MediaTrackConstraints = ultraWideDeviceId
+            ? {
+                deviceId: { ideal: ultraWideDeviceId },
+                width: { ideal: widthIdeal },
+                height: { ideal: heightIdeal },
+                frameRate: { ideal: 30 },
+              }
+            : {
+                facingMode: { ideal: facingMode },
+                width: { ideal: widthIdeal },
+                height: { ideal: heightIdeal },
+                frameRate: { ideal: 30 },
+              };
+
           stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: facingMode },
-              width: { ideal: widthIdeal },
-              height: { ideal: heightIdeal },
-              frameRate: { ideal: 30 },
-            },
+            video: videoConstraints,
             audio: false,
           });
         } catch (e2) {
@@ -553,6 +614,9 @@ class WifiMidiBridge {
       this.localCameraStream = stream;
       this.isStreamingCameraFlag = true;
 
+      // NOTIFICA A TELA DO CELULAR PARA MANTER A IMAGEM ATIVA E NÃO SUMIR!
+      this.notifyLocalStream(stream);
+
       // Handle user stopping stream in browser/system UI
       stream.getVideoTracks().forEach((track) => {
         track.onended = () => {
@@ -573,6 +637,7 @@ class WifiMidiBridge {
             isStreaming: true,
             facingMode,
             resolution,
+            isUltraWide: !!ultraWideDeviceId,
           });
         }
       } else if (this.mode === 'host' && this.connections.size > 0) {
@@ -588,6 +653,7 @@ class WifiMidiBridge {
           isStreaming: true,
           facingMode,
           resolution,
+          isUltraWide: !!ultraWideDeviceId,
         });
       }
 
@@ -597,8 +663,108 @@ class WifiMidiBridge {
       const msg = err instanceof Error ? err.message : 'Falha ao acessar a câmera do celular.';
       console.error('[WiFi Camera Start Error]', err);
       this.isStreamingCameraFlag = false;
+      this.notifyLocalStream(null);
       this.notify();
       return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Alterna a lente da câmera ativa (Ultra Wide 0.5x vs Principal 1x)
+   * Substitui a faixa de vídeo (replaceTrack) em tempo real no WebRTC sem desconectar o PC
+   * e atualiza o preview no celular instantaneamente
+   */
+  public async switchLens(lens: 'ultra-wide' | 'main'): Promise<boolean> {
+    if (!this.localCameraStream) {
+      return false;
+    }
+
+    try {
+      let targetDeviceId: string | null = null;
+      if (lens === 'ultra-wide') {
+        const ultra = await findUltraWideCamera();
+        if (ultra) {
+          targetDeviceId = ultra.deviceId;
+          console.log('[WiFi Bridge] Switching lens to native Ultra Wide:', ultra.label);
+        }
+      } else {
+        const main = await findMainBackCamera();
+        if (main) {
+          targetDeviceId = main.deviceId;
+          console.log('[WiFi Bridge] Switching lens to Main camera:', main.label);
+        }
+      }
+
+      const constraints: MediaStreamConstraints = {
+        video: targetDeviceId
+          ? {
+              deviceId: { exact: targetDeviceId },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 60 },
+            }
+          : {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+        audio: false,
+      };
+
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newTrack = newStream.getVideoTracks()[0];
+      if (!newTrack) return false;
+
+      // Substitui no WebRTC em andamento sem reconectar
+      if (this.activeMediaCall && (this.activeMediaCall as any).peerConnection) {
+        const pc: RTCPeerConnection = (this.activeMediaCall as any).peerConnection;
+        const senders = pc.getSenders();
+        const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newTrack);
+        }
+      }
+
+      // Para as faixas da câmera anterior
+      this.localCameraStream.getVideoTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {}
+      });
+
+      this.localCameraStream = newStream;
+      this.notifyLocalStream(newStream);
+
+      // Notifica o outro dispositivo
+      const msg: WifiSyncMessage = {
+        type: 'cameraStreamState',
+        isStreaming: true,
+        facingMode: 'environment',
+        isUltraWide: lens === 'ultra-wide',
+      };
+      if (this.mode === 'client' && this.activeClientConnection) {
+        this.activeClientConnection.send(msg);
+      } else if (this.mode === 'host') {
+        this.broadcastMessage(msg);
+      }
+
+      this.notify();
+      return true;
+    } catch (err) {
+      console.warn('[WiFi Bridge] Erro ao alternar lente:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Envia comando de zoom/lente para a câmera remota (ex: PC clicando 0,5 ou 1x)
+   */
+  public requestRemoteZoom(zoom: number) {
+    const msg: WifiSyncMessage = { type: 'setRemoteZoom', zoom };
+    if (this.mode === 'host') {
+      this.broadcastMessage(msg);
+    } else if (this.mode === 'client' && this.activeClientConnection) {
+      this.activeClientConnection.send(msg);
     }
   }
 
@@ -607,12 +773,14 @@ class WifiMidiBridge {
    */
   public requestRemoteStartCamera(
     facingMode: 'environment' | 'user' = 'environment',
-    resolution: '1080P' | '720P' = '1080P'
+    resolution: '1080P' | '720P' = '1080P',
+    targetZoom?: number
   ) {
     const msg: WifiSyncMessage = {
       type: 'requestStartCamera',
       facingMode,
       resolution,
+      targetZoom,
     };
     if (this.mode === 'host') {
       this.broadcastMessage(msg);
@@ -644,6 +812,7 @@ class WifiMidiBridge {
         } catch {}
       });
       this.localCameraStream = null;
+      this.notifyLocalStream(null);
     }
 
     if (this.activeMediaCall) {
@@ -678,12 +847,28 @@ class WifiMidiBridge {
     return () => this.remoteStreamListeners.delete(listener);
   }
 
+  public subscribeLocalStream(listener: (stream: MediaStream | null) => void): () => void {
+    this.localStreamListeners.add(listener);
+    listener(this.localCameraStream);
+    return () => this.localStreamListeners.delete(listener);
+  }
+
   private notifyRemoteStream(stream: MediaStream | null) {
     this.remoteStreamListeners.forEach((l) => {
       try {
         l(stream);
       } catch (e) {
         console.error('[WiFi Bridge] Error in remote stream listener:', e);
+      }
+    });
+  }
+
+  private notifyLocalStream(stream: MediaStream | null) {
+    this.localStreamListeners.forEach((l) => {
+      try {
+        l(stream);
+      } catch (e) {
+        console.error('[WiFi Bridge] Error in local stream listener:', e);
       }
     });
   }

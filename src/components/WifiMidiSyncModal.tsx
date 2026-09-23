@@ -420,13 +420,13 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                     {!syncStatus.isStreamingCamera && (
                       <div className="grid grid-cols-2 gap-2 pt-1">
                         <div className="space-y-1">
-                          <label className="text-[10px] text-zinc-400 uppercase font-semibold">Lente</label>
+                          <label className="text-[10px] text-zinc-400 uppercase font-semibold">Lente Inicial</label>
                           <select
                             value={cameraFacing}
                             onChange={(e) => setCameraFacing(e.target.value as 'environment' | 'user')}
                             className="w-full bg-zinc-900 border border-white/10 rounded-lg p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
                           >
-                            <option value="environment">Traseira (Principal)</option>
+                            <option value="environment">Traseira (Piano)</option>
                             <option value="user">Frontal (Selfie)</option>
                           </select>
                         </div>
@@ -442,6 +442,35 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                             <option value="720P">720p (HD 60fps)</option>
                           </select>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Live Lens Switch when Streaming */}
+                    {syncStatus.isStreamingCamera && (
+                      <div className="space-y-2 pt-1 p-2.5 rounded-xl bg-zinc-900/80 border border-white/10">
+                        <div className="flex items-center justify-between text-[11px] text-zinc-300">
+                          <span className="font-semibold text-zinc-200">Alternar Lente em Tempo Real:</span>
+                          <span className="text-cyan-400 font-bold text-[10px]">Ao Vivo</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => wifiMidiBridge.switchLens('ultra-wide')}
+                            className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-cyan-500/20 hover:border-cyan-500/40 text-zinc-200 text-xs font-semibold border border-white/10 transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <span>0.5x Ultra Wide</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => wifiMidiBridge.switchLens('main')}
+                            className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-cyan-500/20 hover:border-cyan-500/40 text-zinc-200 text-xs font-semibold border border-white/10 transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <span>1x Principal</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 leading-tight">
+                          O vídeo continua visível no seu celular enquanto transmite com máxima nitidez para o computador.
+                        </p>
                       </div>
                     )}
 

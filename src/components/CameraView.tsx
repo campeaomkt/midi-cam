@@ -6,6 +6,7 @@ import { getCombinedFilterStyle } from '../utils/filterPresets';
 import { CameraOff, Camera, HelpCircle, RefreshCw, Smartphone, Play, Video } from 'lucide-react';
 import { IOSPermissionGuideModal } from './IOSPermissionGuideModal';
 import { wifiMidiBridge } from '../utils/wifiMidiBridge';
+import { findUltraWideCamera, findMainBackCamera, applyHardwareZoom } from '../utils/cameraLenses';
 
 interface CameraViewProps {
   cameraSettings: CameraSettings;
@@ -58,6 +59,21 @@ export const CameraView: React.FC<CameraViewProps> = ({
   // Remote Mobile Camera over Wi-Fi (Modo Iriun Webcam)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(() => wifiMidiBridge.getRemoteCameraStream());
   const [useRemoteCamera, setUseRemoteCamera] = useState<boolean>(true);
+
+  // Local Transmitting Camera (quando este celular está transmitindo pro PC - mantém a tela do celular sempre ativa)
+  const [localTransmittingStream, setLocalTransmittingStream] = useState<MediaStream | null>(() =>
+    wifiMidiBridge.getLocalCameraStream()
+  );
+  const [isHardwareZoomActive, setIsHardwareZoomActive] = useState<boolean>(false);
+
+  // Subscribe to local camera stream from Wi-Fi bridge (evita tela preta no celular ao transmitir)
+  useEffect(() => {
+    const unsub = wifiMidiBridge.subscribeLocalStream((lStream) => {
+      console.log('[CameraView] Local transmitting camera stream updated:', !!lStream);
+      setLocalTransmittingStream(lStream);
+    });
+    return unsub;
+  }, []);
 
   // Subscribe to incoming remote video streams from mobile device
   useEffect(() => {
@@ -158,6 +174,56 @@ export const CameraView: React.FC<CameraViewProps> = ({
               });
             } catch {}
           }
+        }
+      } catch {}
+    }
+
+    // Step 0.6: Lente Ultra Wide nativa do iPhone / Android (0.5x)
+    if (!mediaStream && !cameraSettings.selectedVideoDeviceId && cameraSettings.zoom === 0.5 && cameraSettings.facingMode === 'environment') {
+      try {
+        const ultraCam = await findUltraWideCamera();
+        if (ultraCam && ultraCam.deviceId) {
+          console.log('[CameraView] Usando lente Ultra Wide nativa do iPhone (0.5x):', ultraCam.label);
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: ultraCam.deviceId },
+              width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+              height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+            },
+            audio: false,
+          });
+        }
+      } catch (ultraErr) {
+        console.warn('[CameraView] Falha ao solicitar lente Ultra Wide exata, tentando ideal...', ultraErr);
+        try {
+          const ultraCam = await findUltraWideCamera();
+          if (ultraCam && ultraCam.deviceId) {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { ideal: ultraCam.deviceId },
+                width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+                height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+              },
+              audio: false,
+            });
+          }
+        } catch {}
+      }
+    }
+
+    // Step 0.7: Câmera traseira principal 1x (ao alternar de volta de 0.5x)
+    if (!mediaStream && !cameraSettings.selectedVideoDeviceId && cameraSettings.zoom === 1 && cameraSettings.facingMode === 'environment') {
+      try {
+        const mainCam = await findMainBackCamera();
+        if (mainCam && mainCam.deviceId) {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { ideal: mainCam.deviceId },
+              width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+              height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+            },
+            audio: false,
+          });
         }
       } catch {}
     }
@@ -275,6 +341,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     cameraSettings.resolution,
     cameraSettings.flashEnabled,
     cameraSettings.selectedVideoDeviceId,
+    cameraSettings.zoom,
     videoRef,
   ]);
 
@@ -328,15 +395,40 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [stream, videoRef]);
 
-  // Initialize camera or swap to remote mobile stream
+  // Hardware zoom on active track when zoom changes
+  useEffect(() => {
+    const currentTrack = stream?.getVideoTracks()[0];
+    if (!currentTrack) return;
+
+    if (cameraSettings.zoom === 0.5) {
+      // 0.5x handled via native Ultra Wide lens switch
+      setIsHardwareZoomActive(true);
+      return;
+    }
+
+    applyHardwareZoom(currentTrack, cameraSettings.zoom).then((success) => {
+      setIsHardwareZoomActive(success);
+    });
+  }, [cameraSettings.zoom, stream]);
+
+  // Initialize camera or swap to remote mobile stream / local transmitting stream
   useEffect(() => {
     if (remoteStream && useRemoteCamera) {
       console.log('[CameraView] Active stream set to Remote Mobile Camera');
-      if (streamRef.current && streamRef.current !== remoteStream) {
+      if (streamRef.current && streamRef.current !== remoteStream && streamRef.current !== localTransmittingStream) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
       streamRef.current = remoteStream;
       setStream(remoteStream);
+      setHasPermission(true);
+      setCameraError(null);
+    } else if (localTransmittingStream) {
+      console.log('[CameraView] Active stream set to Local Transmitting Camera (Mobile feed kept alive)');
+      if (streamRef.current && streamRef.current !== localTransmittingStream && streamRef.current !== remoteStream) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      streamRef.current = localTransmittingStream;
+      setStream(localTransmittingStream);
       setHasPermission(true);
       setCameraError(null);
     } else {
@@ -344,12 +436,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
 
     return () => {
-      if (streamRef.current && streamRef.current !== remoteStream) {
+      if (streamRef.current && streamRef.current !== remoteStream && streamRef.current !== localTransmittingStream) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       }
     };
-  }, [remoteStream, useRemoteCamera, initCamera]);
+  }, [remoteStream, useRemoteCamera, localTransmittingStream, initCamera]);
 
   // Combined CSS filter string
   const cssFilterValue = getCombinedFilterStyle(activeFilter, filterAdjustments);
@@ -426,6 +518,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   };
 
+  // Se o zoom de hardware ou a lente nativa Ultra Wide foi ativada, a escala visual é 1 (sem encolher a imagem com bordas pretas)
+  // Em zoom 2x ou 4x sem hardware, aplica corte suave no centro mantendo enquadramento perfeito
+  const visualZoomScale =
+    cameraSettings.zoom === 0.5 || isHardwareZoomActive
+      ? 1
+      : Math.max(1, cameraSettings.zoom ?? 1);
+
   return (
     <div
       id="camera-viewport-container"
@@ -441,7 +540,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
       <div
         className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center transition-transform duration-200"
         style={{
-          transform: `scale(${cameraSettings.zoom})`,
+          transform: `scale(${visualZoomScale})`,
         }}
       >
         <video

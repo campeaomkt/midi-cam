@@ -1,6 +1,7 @@
 import React from 'react';
 import { CameraSettings, FilterPreset, FilterType } from '../types';
 import { RefreshCw, Sparkles, Film, Disc } from 'lucide-react';
+import { wifiMidiBridge } from '../utils/wifiMidiBridge';
 
 interface BottomControlsProps {
   cameraSettings: CameraSettings;
@@ -47,7 +48,15 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
               key={lvl}
               type="button"
               id={`btn-zoom-${lvl}`}
-              onClick={() => onUpdateCamera({ zoom: lvl })}
+              onClick={() => {
+                onUpdateCamera({ zoom: lvl });
+                // Envia comando de zoom/lente para a ponte Wi-Fi caso conectado
+                wifiMidiBridge.requestRemoteZoom(lvl);
+                // Se este próprio dispositivo estiver transmitindo a câmera, troca a lente
+                if (wifiMidiBridge.getLocalCameraStream()) {
+                  wifiMidiBridge.switchLens(lvl === 0.5 ? 'ultra-wide' : 'main');
+                }
+              }}
               className={`px-2 py-0.5 md:px-3 md:py-1 rounded-full transition-all cursor-pointer ${
                 isSelected
                   ? 'text-amber-400 font-extrabold scale-110'
