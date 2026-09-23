@@ -94,6 +94,7 @@ export default function App() {
     glowIntensity: 80, // Default 80% glow intensity
     soundEnabled: true,
     synthVolume: 0.75,
+    audioBufferSize: 512, // Default 512 fotogramas (~10.6ms) for immediate responsiveness and excellent stability
     viewMode: 'fit',
     visualModel: 'realistic-3d',
   });
@@ -214,6 +215,13 @@ export default function App() {
   useEffect(() => {
     keyboardSettingsRef.current = keyboardSettings;
   }, [keyboardSettings]);
+
+  // Apply Audio Buffer Size to SoundFont engine
+  useEffect(() => {
+    if (keyboardSettings.audioBufferSize) {
+      audioSynth.setBufferSize(keyboardSettings.audioBufferSize);
+    }
+  }, [keyboardSettings.audioBufferSize]);
 
   // Auto-detect real physical webcam if selected is missing or currently pointing to a virtual device like Iriun or OBS
   useEffect(() => {
@@ -408,36 +416,27 @@ export default function App() {
       let micStream: MediaStream | null = null;
       if (shouldRecordMic) {
         try {
-          // Standard high-quality voice capture with autoGainControl enabled
-          // This ensures webcam and mobile microphones achieve healthy nominal levels
+          // Studio-grade uncompressed audio capture for music (Windows WASAPI & CoreAudio standard)
+          // Disables echoCancellation and autoGainControl so piano audio does NOT duck or distort the vocal!
           micStream = await navigator.mediaDevices.getUserMedia({
-            audio: cameraSettings.selectedAudioDeviceId
-              ? {
-                  deviceId: { exact: cameraSettings.selectedAudioDeviceId },
-                  autoGainControl: true,
-                  noiseSuppression: true,
-                  echoCancellation: true,
-                }
-              : {
-                  autoGainControl: true,
-                  noiseSuppression: true,
-                  echoCancellation: true,
-                },
+            audio: {
+              ...(cameraSettings.selectedAudioDeviceId ? { deviceId: { exact: cameraSettings.selectedAudioDeviceId } } : {}),
+              echoCancellation: false,
+              autoGainControl: false,
+              noiseSuppression: false,
+              channelCount: 2,
+            },
           });
-        } catch (aecErr) {
-          console.warn('Tentativa com AGC falhou, tentando padrão com deviceId...', aecErr);
+        } catch (studioMicErr) {
+          console.warn('Tentativa com microfone studio puro falhou, tentando fallback flexível...', studioMicErr);
           try {
             micStream = await navigator.mediaDevices.getUserMedia({
               audio: cameraSettings.selectedAudioDeviceId
                 ? { deviceId: { exact: cameraSettings.selectedAudioDeviceId } }
                 : true,
             });
-          } catch (devErr) {
-            try {
-              micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch (fallbackErr) {
-              console.warn('Microfone indisponível para gravação:', fallbackErr);
-            }
+          } catch (fallbackErr) {
+            console.warn('Microfone indisponível para gravação:', fallbackErr);
           }
         }
       }

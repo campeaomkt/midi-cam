@@ -7,12 +7,11 @@
 import { SoundFontEngine } from '../audio/SoundFontEngine';
 import { getSharedAudioContext, ensureAudioContextRunning } from '../audio/sharedAudioContext';
 import { unlockAudioContext, setupAutoUnlock } from './iosAudioUnlock';
+import { wasapiPipeline } from '../audio/wasapiAudioPipeline';
 
 class AudioSynthManager {
   private ctx: AudioContext | null = null;
   private soundfontBus: GainNode | null = null;
-  private masterGain: GainNode | null = null;
-  private streamDestination: MediaStreamAudioDestinationNode | null = null;
   private isMuted: boolean = false;
   private volume: number = 0.85;
   private sustainActive: boolean = false;
@@ -25,31 +24,26 @@ class AudioSynthManager {
   }
 
   public initContext() {
-    if (this.ctx) return;
+    if (this.ctx && this.soundfontBus) return;
 
     this.ctx = getSharedAudioContext();
+    const pipeline = wasapiPipeline.getPipeline();
 
     // 1. Dedicated SoundFont Bus: Receives pure audio directly from SoundFontEngine (FluidSynth)
-    // Completely uncolored, zero filters, zero equalizers, zero compression
     this.soundfontBus = this.ctx.createGain();
     this.soundfontBus.gain.setValueAtTime(1.0, this.ctx.currentTime);
 
-    // 2. Master Gain for live monitoring (speakers / headphones)
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-
-    // Route soundfont bus directly to live speaker monitor
-    this.soundfontBus.connect(this.masterGain);
-    this.masterGain.connect(this.ctx.destination);
-
-    // Create stream destination for direct recording
-    this.streamDestination = this.ctx.createMediaStreamDestination();
-    this.soundfontBus.connect(this.streamDestination);
+    // Route soundfont bus directly into the Windows WASAPI Master Piano Stage
+    // (Headroom protection, broadcast limiter & anti-clip soft shaper)
+    this.soundfontBus.connect(pipeline.pianoInputBus);
 
     // Initialize the FluidSynth SoundFont engine with this AudioContext and soundfontBus
     SoundFontEngine.init(this.ctx, this.soundfontBus).catch((e) => {
       console.warn('SoundFontEngine init warning:', e);
     });
+
+    // Sync master volume
+    wasapiPipeline.setLiveMasterVolume(this.volume, this.isMuted);
 
     // Unlock context and iOS silent mode
     unlockAudioContext(this.ctx);
@@ -68,20 +62,18 @@ class AudioSynthManager {
 
   public getMasterGain(): GainNode {
     this.initContext();
-    return this.masterGain!;
+    return wasapiPipeline.getPipeline().masterLiveGain;
   }
 
   public getAudioStreamDestination(): MediaStreamAudioDestinationNode | null {
     this.initContext();
-    return this.streamDestination;
+    return wasapiPipeline.getPipeline().recordingDestination;
   }
 
-  private activeRecordingMicSource: MediaStreamAudioSourceNode | null = null;
-
   /**
-   * Creates a dedicated pure MediaStream for video recording.
-   * Completely transparent audio path: No EQ, No compressors, No limiters.
-   * Delivers pure, dynamic, authentic sound identical to a professional DAW.
+   * Creates a dedicated, WASAPI-mastered MediaStream for video recording.
+   * Both Piano and Voice pass through the studio brickwall limiter and soft shaper.
+   * Completely eliminates clipping, inter-track interference, and ducking.
    */
   public getRecordingAudioStream(
     micStream?: MediaStream | null,
@@ -92,98 +84,39 @@ class AudioSynthManager {
     cleanup: () => void;
   } {
     this.initContext();
-    const ctx = this.ctx!;
-    const recDest = ctx.createMediaStreamDestination();
 
-    // Ensure SoundFontEngine output node is hooked to soundfontBus
-    const sfNode = SoundFontEngine.getOutputNode();
-    if (sfNode && this.soundfontBus) {
-      try {
-        sfNode.connect(this.soundfontBus);
-      } catch {}
-    }
+    // Configure Piano gain on the WASAPI stage for the recording
+    wasapiPipeline.setPianoGain(keyboardGainMultiplier);
 
-    const hasMic = Boolean(micStream && micStream.getAudioTracks().length > 0 && micGainMultiplier > 0);
-    const hasKeyboard = keyboardGainMultiplier > 0;
-
-    // 1. Direct transparent gain for keyboard audio into the recording destination
-    let keyboardRecGain: GainNode | null = null;
-    if (hasKeyboard && this.soundfontBus) {
-      keyboardRecGain = ctx.createGain();
-      keyboardRecGain.gain.setValueAtTime(keyboardGainMultiplier, ctx.currentTime);
-
-      this.soundfontBus.connect(keyboardRecGain);
-      keyboardRecGain.connect(recDest);
-    }
-
-    // 2. Direct transparent gain for microphone into recording destination
-    let micSource: MediaStreamAudioSourceNode | null = null;
-    let micGainNode: GainNode | null = null;
-
-    if (hasMic && micStream) {
-      try {
-        micSource = ctx.createMediaStreamSource(micStream);
-        this.activeRecordingMicSource = micSource;
-
-        micGainNode = ctx.createGain();
-        micGainNode.gain.setValueAtTime(micGainMultiplier, ctx.currentTime);
-
-        micSource.connect(micGainNode);
-        micGainNode.connect(recDest);
-      } catch (err) {
-        console.warn('Failed to connect mic to recording destination:', err);
-      }
+    // If microphone is active, route through the dedicated vocal channel strip
+    let detachMic: (() => void) | null = null;
+    if (micStream && micStream.getAudioTracks().length > 0 && micGainMultiplier > 0) {
+      detachMic = wasapiPipeline.attachMicrophone(micStream, micGainMultiplier);
     }
 
     const cleanup = () => {
-      try {
-        if (keyboardRecGain) {
-          if (this.soundfontBus) {
-            try {
-              this.soundfontBus.disconnect(keyboardRecGain);
-            } catch {}
-          }
-          try {
-            keyboardRecGain.disconnect();
-          } catch {}
-        }
-        if (micSource) {
-          try {
-            micSource.disconnect();
-          } catch {}
-        }
-        if (micGainNode) {
-          try {
-            micGainNode.disconnect();
-          } catch {}
-        }
-        if (this.activeRecordingMicSource === micSource) {
-          this.activeRecordingMicSource = null;
-        }
-        if (micStream) {
-          micStream.getTracks().forEach((t) => t.stop());
-        }
-      } catch (e) {
-        // ignore
+      if (detachMic) {
+        detachMic();
       }
+      // Reset piano gain to nominal 1.0
+      wasapiPipeline.setPianoGain(1.0);
     };
 
-    return { stream: recDest.stream, cleanup };
+    return {
+      stream: wasapiPipeline.getRecordingMediaStream(),
+      cleanup,
+    };
   }
 
   public setVolume(vol: number) {
     this.volume = Math.max(0, Math.min(1.5, vol));
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime, 0.05);
-    }
+    wasapiPipeline.setLiveMasterVolume(this.volume, this.isMuted);
     SoundFontEngine.setVolume(this.volume * 100);
   }
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime, 0.05);
-    }
+    wasapiPipeline.setLiveMasterVolume(this.volume, this.isMuted);
   }
 
   public setSustain(active: boolean) {
@@ -202,6 +135,10 @@ class AudioSynthManager {
 
   public stopAllNotes() {
     SoundFontEngine.panic();
+  }
+
+  public setBufferSize(size: 256 | 512 | 1024 | 2048) {
+    SoundFontEngine.setBufferSize(size);
   }
 }
 

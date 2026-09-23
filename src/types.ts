@@ -86,6 +86,7 @@ export interface KeyboardSettings {
   glowIntensity?: number; // 0 to 100 percentage for key illumination glow
   soundEnabled: boolean;
   synthVolume: number;
+  audioBufferSize?: 256 | 512 | 1024 | 2048; // Latência do sintetizador (256 ultra-baixo, 512 recomendado, 1024 padrão, 2048 estabilidade)
   viewMode: 'fit' | 'scroll'; // 'fit' fits entire piano on screen, 'scroll' allows touch navigation
 }
 

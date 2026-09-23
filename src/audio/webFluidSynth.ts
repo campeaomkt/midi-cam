@@ -20,6 +20,7 @@ export interface WebFluidSynthOptions {
   polyphony?: number;
   gain?: number;
   sampleRate?: number;
+  bufferSize?: 256 | 512 | 1024 | 2048;
 }
 
 export class WebFluidSynth {
@@ -29,14 +30,16 @@ export class WebFluidSynth {
   private loadedSFontId: number | null = null;
   private isInitialized = false;
   private isWorkletMode = false;
-  private currentGain = 1.0;
-  private polyphony = 256;
+  private currentGain = 0.70;
+  private polyphony = 1024;
+  private bufferSize: 256 | 512 | 1024 | 2048 = 512;
   private destinationNode: AudioNode | null = null;
   private initPromise: Promise<void> | null = null;
 
   constructor(options?: WebFluidSynthOptions) {
     if (options?.polyphony) this.polyphony = options.polyphony;
     if (options?.gain !== undefined) this.currentGain = Math.max(0.01, Math.min(1.5, options.gain));
+    if (options?.bufferSize) this.bufferSize = options.bufferSize;
   }
 
   public getIsReady(): boolean {
@@ -145,20 +148,22 @@ export class WebFluidSynth {
           const fallbackSynth = new SynthClass();
           fallbackSynth.init(this.ctx.sampleRate, {
             initialGain: this.currentGain,
-            polyphony: 256,
-            reverbActive: true,
-            reverbRoomSize: 0.35,
-            reverbDamp: 0.45,
-            reverbWidth: 0.7,
-            reverbLevel: 0.22,
+            polyphony: this.polyphony,
+            reverbActive: false,
+            overflowAge: 500.0,
+            overflowPercussion: 4000.0,
+            overflowReleased: -10000.0,
+            overflowSustained: -2000.0,
+            overflowVolume: 1000.0,
+            minNoteLength: 5,
           });
-          const node = fallbackSynth.createAudioNode(this.ctx, 1024);
+          const node = fallbackSynth.createAudioNode(this.ctx, this.bufferSize);
 
           node.connect(targetDestination);
           this.synth = fallbackSynth;
           this.audioNode = node;
           this.isWorkletMode = false;
-          console.log('[FluidSynth] Main-thread fallback Synthesizer initialized successfully with 256 polyphony & 1024 buffer');
+          console.log(`[FluidSynth] Main-thread Synthesizer active with ${this.polyphony} polyphony & ${this.bufferSize} buffer`);
         } catch (fallbackErr) {
           console.error('[FluidSynth] Failed to initialize fallback synthesizer:', fallbackErr);
           throw fallbackErr;
@@ -297,10 +302,16 @@ export class WebFluidSynth {
     const fallbackSynth = new SynthClass();
     fallbackSynth.init(this.ctx.sampleRate, {
       initialGain: this.currentGain,
-      polyphony: 256,
+      polyphony: this.polyphony,
       reverbActive: false,
+      overflowAge: 500.0,
+      overflowPercussion: 4000.0,
+      overflowReleased: -10000.0,
+      overflowSustained: -2000.0,
+      overflowVolume: 1000.0,
+      minNoteLength: 5,
     });
-    const node = fallbackSynth.createAudioNode(this.ctx, 1024);
+    const node = fallbackSynth.createAudioNode(this.ctx, this.bufferSize);
     node.connect(targetDestination);
 
     this.synth = fallbackSynth;
@@ -309,7 +320,7 @@ export class WebFluidSynth {
     this.loadedSFontId = null;
     this.isInitialized = true;
     this.applyEngineDefaults();
-    console.log('[FluidSynth] Main-Thread Synthesizer engine active and ready with 256 polyphony & 1024 buffer');
+    console.log(`[FluidSynth] Main-Thread Synthesizer engine active with ${this.polyphony} polyphony & ${this.bufferSize} buffer`);
   }
 
   public async loadSoundFont(sf2Buffer: ArrayBuffer): Promise<number> {
@@ -427,30 +438,48 @@ export class WebFluidSynth {
     }
   }
 
+  /**
+   * Professional DAW 5-Level Dynamic Sensitivity Mapping (Standard Kontakt / Logic / Ableton curve)
+   * Resolves 5 distinct acoustic dynamic zones natively without requiring any configuration:
+   *  - Level 1: Pianissimo (pp, 1..24)   -> Warm, audible, intimate pianissimo (16..38)
+   *  - Level 2: Piano (p, 25..55)        -> Lyrical soft accompaniment (39..66)
+   *  - Level 3: Mezzo-Forte (mf, 56..85) -> Balanced acoustic core (67..92)
+   *  - Level 4: Forte (f, 86..110)       -> Dynamic attack prominence (93..114)
+   *  - Level 5: Fortissimo (ff, 111..127)-> Maximum punch, soaring above chords (115..127)
+   */
+  private mapDawDynamicVelocity(rawVel: number): number {
+    if (rawVel <= 0) return 0;
+    if (rawVel >= 127) return 127;
+
+    // The 5 standard DAW dynamic anchor points (raw MIDI velocity -> acoustic synthesis velocity)
+    const anchors = [
+      { x: 1, y: 16 },
+      { x: 24, y: 38 },
+      { x: 55, y: 66 },
+      { x: 85, y: 92 },
+      { x: 110, y: 114 },
+      { x: 127, y: 127 },
+    ];
+
+    for (let i = 0; i < anchors.length - 1; i++) {
+      const p0 = anchors[i];
+      const p1 = anchors[i + 1];
+      if (rawVel >= p0.x && rawVel <= p1.x) {
+        const t = (rawVel - p0.x) / (p1.x - p0.x);
+        // Hermite smoothstep for seamless, continuous transition across all 5 dynamic levels
+        const smoothT = t * t * (3 - 2 * t);
+        return Math.round(p0.y + (p1.y - p0.y) * smoothT);
+      }
+    }
+
+    return rawVel;
+  }
+
   public noteOn(channel = 0, note: number, velocity = 96) {
     if (!this.synth) return;
 
-    // Professional DAW Acoustic Dynamic Scaling (Kontakt / Ableton / Pianoteq standard)
-    // In SoundFont 2 spec, default attenuation is -96dB, which causes raw velocities 1-20
-    // to be completely silent ("se eu aperto fraquinho nem som sai").
-    // Professional piano samplers calibrate to a 24dB acoustic dynamic range:
-    // vel 1 = -24dB (audible, warm, delicate pianissimo pp, never silent)
-    // vel 64 = -12dB (expressive, rich mezzo-forte mf)
-    // vel 127 = 0dB (full fortissimo ff)
-    // In decibels: targetDb = -24 * (1 - norm)
-    // FluidSynth attenuation: -40 * log10(v / 127) = targetDb
-    // Solving for v: v = 127 * 10^(0.60 * (norm - 1))
-    let synthVel: number;
-    if (velocity <= 0) {
-      synthVel = 0;
-    } else if (velocity >= 127) {
-      synthVel = 127;
-    } else {
-      const norm = (velocity - 1) / 126;
-      synthVel = Math.round(127 * Math.pow(10, 0.60 * (norm - 1)));
-      synthVel = Math.min(127, Math.max(32, synthVel));
-    }
-
+    // Apply native 5-tier DAW dynamic velocity mapping
+    const synthVel = this.mapDawDynamicVelocity(velocity);
     this.synth.midiNoteOn(channel, note, synthVel);
   }
 
@@ -497,6 +526,34 @@ export class WebFluidSynth {
 
   public getGain(): number {
     return this.currentGain;
+  }
+
+  public getBufferSize(): number {
+    return this.bufferSize;
+  }
+
+  public setBufferSize(size: 256 | 512 | 1024 | 2048): void {
+    const validSizes = [256, 512, 1024, 2048];
+    if (!validSizes.includes(size)) return;
+    if (this.bufferSize === size) return;
+    this.bufferSize = size;
+
+    if (this.ctx && this.synth && !this.isWorkletMode) {
+      const targetDestination = this.destinationNode || this.ctx.destination;
+      try {
+        if (this.audioNode) {
+          this.audioNode.disconnect();
+        }
+      } catch {}
+      try {
+        const newNode = (this.synth as any).createAudioNode(this.ctx, this.bufferSize);
+        newNode.connect(targetDestination);
+        this.audioNode = newNode;
+        console.log(`[FluidSynth] Live audio buffer switched to ${this.bufferSize} frames`);
+      } catch (err) {
+        console.warn('[FluidSynth] Failed to dynamically swap audio buffer size:', err);
+      }
+    }
   }
 
   public close() {

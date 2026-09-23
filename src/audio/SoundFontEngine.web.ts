@@ -24,8 +24,9 @@ export class SoundFontEngineWeb {
 
   constructor() {
     this.fluidSynth = new WebFluidSynth({
-      polyphony: 256,
-      gain: 0.55,
+      polyphony: 1024,
+      gain: 0.70,
+      bufferSize: 512,
     });
   }
 
@@ -321,6 +322,14 @@ export class SoundFontEngineWeb {
 
   public setReleaseTime(seconds: number): void {
     this.fluidSynth.setReleaseTime(seconds);
+  }
+
+  public setBufferSize(size: 256 | 512 | 1024 | 2048): void {
+    this.fluidSynth.setBufferSize(size);
+  }
+
+  public getBufferSize(): number {
+    return this.fluidSynth.getBufferSize();
   }
 }
 

@@ -31,6 +31,8 @@ class MidiManager {
   private devices: MidiDevice[] = [];
   private sustainActive: boolean = false;
   private heldKeys: Set<number> = new Set();
+  private noteOnTimestamps: Map<number, number> = new Map();
+  private pendingNoteOffs: Map<number, ReturnType<typeof setTimeout>> = new Map();
 
   constructor() {
     this.isSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
@@ -159,6 +161,9 @@ class MidiManager {
   }
 
   public panic() {
+    this.pendingNoteOffs.forEach((timer) => clearTimeout(timer));
+    this.pendingNoteOffs.clear();
+    this.noteOnTimestamps.clear();
     this.heldKeys.clear();
     this.sustainActive = false;
     SoundFontEngine.panic();
@@ -167,11 +172,39 @@ class MidiManager {
   }
 
   private handleNoteOn(note: number, velocity: number, isRemoteSync = false) {
+    const pending = this.pendingNoteOffs.get(note);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingNoteOffs.delete(note);
+    }
+    this.noteOnTimestamps.set(note, performance.now());
     this.heldKeys.add(note);
     this.notifyNoteOn(note, velocity, isRemoteSync);
   }
 
   private handleNoteOff(note: number, isRemoteSync = false) {
+    const onTime = this.noteOnTimestamps.get(note) || 0;
+    const elapsed = performance.now() - onTime;
+
+    // Physical keybed debounce & rebound guard:
+    // When a pianist hits a note hard with emphasis in a full chord, the mechanical key mechanism
+    // can bounce against the keybed or send an out-of-order NoteOff within 1-20 milliseconds.
+    // If NoteOff arrives in < 25ms, delay it briefly so the emphasized note's body rings cleanly
+    // without getting cut off into silence while other chord notes continue sounding.
+    if (elapsed < 25) {
+      const existing = this.pendingNoteOffs.get(note);
+      if (existing) clearTimeout(existing);
+
+      const timer = setTimeout(() => {
+        this.pendingNoteOffs.delete(note);
+        this.heldKeys.delete(note);
+        this.notifyNoteOff(note, isRemoteSync);
+      }, Math.max(1, 28 - elapsed));
+
+      this.pendingNoteOffs.set(note, timer);
+      return;
+    }
+
     this.heldKeys.delete(note);
     this.notifyNoteOff(note, isRemoteSync);
   }

@@ -21,9 +21,11 @@ import {
   ArrowRight,
   Zap,
   Sliders,
+  Gauge,
   Camera,
   Mic,
   Type,
+  ShieldCheck,
 } from 'lucide-react';
 import { KEY_COUNT_OPTIONS } from './VirtualKeyboard';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -291,6 +293,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* Buffer Size & Latency Controls */}
+              <div className="mt-2.5 pt-2.5 border-t border-white/10 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Gauge className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-white">Buffer de Áudio (Latência do Motor)</span>
+                  </div>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold border border-amber-400/30">
+                    {keyboardSettings.audioBufferSize || 512} fotogramas (
+                    {(keyboardSettings.audioBufferSize || 512) === 256
+                      ? '~5.3 ms'
+                      : (keyboardSettings.audioBufferSize || 512) === 512
+                      ? '~10.6 ms'
+                      : (keyboardSettings.audioBufferSize || 512) === 1024
+                      ? '~21.3 ms'
+                      : '~42.6 ms'}
+                    )
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-tight">
+                  Tamanhos menores reduzem o atraso da resposta ao tocar. 512 ou 256 oferecem resposta imediata para teclados MIDI.
+                </p>
+                <div className="grid grid-cols-4 gap-1.5 mt-0.5">
+                  {([
+                    { size: 256, label: '256', sub: 'Ultra Baixo (~5ms)' },
+                    { size: 512, label: '512', sub: 'Baixo (~10ms)' },
+                    { size: 1024, label: '1024', sub: 'Padrão (~21ms)' },
+                    { size: 2048, label: '2048', sub: 'Estável (~42ms)' },
+                  ] as const).map(({ size, label, sub }) => {
+                    const isSelected = (keyboardSettings.audioBufferSize || 512) === size;
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => onUpdateKeyboard({ audioBufferSize: size })}
+                        className={`flex flex-col items-center justify-center p-2 rounded-lg border transition cursor-pointer text-center ${
+                          isSelected
+                            ? 'bg-amber-400/20 border-amber-400/70 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.15)] font-bold'
+                            : 'bg-zinc-800/80 border-white/5 hover:border-white/20 text-zinc-300'
+                        }`}
+                      >
+                        <span className="text-xs font-mono">{label}</span>
+                        <span className="text-[9px] text-zinc-400 leading-tight mt-0.5">{sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1069,6 +1120,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span className="text-xs font-bold text-white block">Áudio da Gravação do Vídeo</span>
               <span className="text-[11px] text-zinc-400 block">
                 Escolha o que deseja capturar no áudio do arquivo gravado
+              </span>
+            </div>
+
+            {/* WASAPI Master Audio & Anti-Clip Engine Indicator */}
+            <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+                <div>
+                  <span className="font-bold text-cyan-200 block text-[11px]">
+                    Master WASAPI Studio Ativo
+                  </span>
+                  <span className="text-[10px] text-zinc-400 block">
+                    Limiter True-Peak + Soft-Clipper: zero clipes ao tocar e na gravação de Piano + Voz
+                  </span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 font-mono text-[9px] font-bold uppercase tracking-wider shrink-0 border border-cyan-500/30">
+                WASAPI HD
               </span>
             </div>
 
