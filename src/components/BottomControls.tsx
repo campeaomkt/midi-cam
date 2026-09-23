@@ -42,7 +42,36 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
       {/* Zoom Selector Row (matching 0,5 - 1x - 2 - 4 in screenshot) */}
       <div className="flex items-center gap-2 md:gap-3 bg-black/45 backdrop-blur-md px-3 py-1 md:px-4 md:py-1.5 rounded-full border border-white/10 shadow-lg text-xs md:text-sm font-bold">
         {zoomLevels.map((lvl) => {
-          const isSelected = cameraSettings.zoom === lvl;
+          const isSelected =
+            cameraSettings.zoom === lvl ||
+            (lvl === 0.5 && cameraSettings.zoom <= 0.6) ||
+            (lvl === 1 && cameraSettings.zoom > 0.6 && cameraSettings.zoom <= 1.4) ||
+            (lvl === 2 && cameraSettings.zoom > 1.4 && cameraSettings.zoom < 3) ||
+            (lvl === 4 && cameraSettings.zoom >= 3);
+
+          const displayLabel = () => {
+            if (lvl === 0.5) return '0,5';
+            if (lvl === 1) {
+              if (isSelected && cameraSettings.zoom > 0.6 && cameraSettings.zoom <= 1.4 && cameraSettings.zoom !== 1) {
+                return `${cameraSettings.zoom.toFixed(1)}x`;
+              }
+              return '1x';
+            }
+            if (lvl === 2) {
+              if (isSelected && cameraSettings.zoom > 1.4 && cameraSettings.zoom < 3 && cameraSettings.zoom !== 2) {
+                return `${cameraSettings.zoom.toFixed(1)}x`;
+              }
+              return '2';
+            }
+            if (lvl === 4) {
+              if (isSelected && cameraSettings.zoom >= 3 && cameraSettings.zoom !== 4) {
+                return `${cameraSettings.zoom.toFixed(1)}x`;
+              }
+              return '4';
+            }
+            return `${lvl}`;
+          };
+
           return (
             <button
               key={lvl}
@@ -57,13 +86,13 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
                   wifiMidiBridge.switchLens(lvl === 0.5 ? 'ultra-wide' : 'main');
                 }
               }}
-              className={`px-2 py-0.5 md:px-3 md:py-1 rounded-full transition-all cursor-pointer ${
+              className={`px-2.5 py-0.5 md:px-3 md:py-1 rounded-full transition-all cursor-pointer ${
                 isSelected
-                  ? 'text-amber-400 font-extrabold scale-110'
+                  ? 'text-amber-400 font-extrabold scale-110 bg-white/10 shadow-sm'
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              {lvl === 1 ? '1x' : lvl === 0.5 ? '0,5' : `${lvl}`}
+              {displayLabel()}
             </button>
           );
         })}

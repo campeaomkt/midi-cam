@@ -23,7 +23,6 @@ import {
   SwitchCamera,
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import { wifiMidiBridge } from '../utils/wifiMidiBridge';
 import { midiManager } from '../utils/midiManager';
 import { WifiSyncStatus } from '../types';
@@ -218,38 +217,37 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
           await scannerVideoRef.current.play().catch(() => {});
         }
 
-        const scanLoop = () => {
+        let barcodeDetector: any = null;
+        if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+          try {
+            barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+          } catch {}
+        }
+
+        const scanLoop = async () => {
           if (!scannerVideoRef.current) return;
           const video = scannerVideoRef.current;
           if (video.readyState >= 2) {
-            if (!scannerCanvasRef.current) {
-              scannerCanvasRef.current = document.createElement('canvas');
-            }
-            const canvas = scannerCanvasRef.current;
-            if (video.videoWidth && video.videoHeight) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d', { willReadFrequently: true });
-              if (ctx) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const qr = jsQR(imgData.data, imgData.width, imgData.height, {
-                  inversionAttempts: 'dontInvert',
-                });
-                if (qr && qr.data) {
-                  const code = extractSyncCode(qr.data);
-                  if (code) {
-                    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-                      navigator.vibrate([60, 40, 60]);
+            try {
+              if (barcodeDetector) {
+                const barcodes = await barcodeDetector.detect(video);
+                if (barcodes && barcodes.length > 0) {
+                  const rawVal = barcodes[0].rawValue || barcodes[0].data;
+                  if (rawVal) {
+                    const code = extractSyncCode(rawVal);
+                    if (code) {
+                      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                        navigator.vibrate([60, 40, 60]);
+                      }
+                      setInputCode(code);
+                      stopQrScanner();
+                      wifiMidiBridge.connectClient(code);
+                      return;
                     }
-                    setInputCode(code);
-                    stopQrScanner();
-                    wifiMidiBridge.connectClient(code);
-                    return;
                   }
                 }
               }
-            }
+            } catch {}
           }
           scanRafRef.current = requestAnimationFrame(scanLoop);
         };

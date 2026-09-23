@@ -601,6 +601,7 @@ export default function App() {
             onNotePlay={handleNotePlay}
             onNoteRelease={handleNoteRelease}
             onUpdateKeyboard={(upd) => setKeyboardSettings((prev) => ({ ...prev, ...upd }))}
+            onUpdateCamera={(upd) => setCameraSettings((prev) => ({ ...prev, ...upd }))}
           />
         </section>
 
