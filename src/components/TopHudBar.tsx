@@ -27,7 +27,7 @@ interface TopHudBarProps {
   activeSoundFontName?: string;
   isSustainActive?: boolean;
   wifiSyncStatus?: WifiSyncStatus;
-  cameras?: MediaDeviceInfo[];
+  cameras?: Array<MediaDeviceInfo | { deviceId: string; label: string; kind?: string }>;
   onFlipCamera?: () => void;
   onOpenWifiSync?: () => void;
   onToggleSustain?: () => void;

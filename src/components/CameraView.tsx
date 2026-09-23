@@ -422,12 +422,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
           return;
         }
 
-        // Se o track não suportou constraint direto, tenta alternar para o deviceId da câmera Ultra-Wide
+        // Se o track não suportou constraint direto, tenta alternar para a câmera Ultra-Wide
         try {
           const ultraCam = await findUltraWideCamera();
+          let newStream: MediaStream | null = null;
           if (ultraCam && ultraCam.deviceId) {
-            console.log('[CameraView] Alternando para lente Ultra Wide nativa:', ultraCam.label);
-            const newStream = await navigator.mediaDevices.getUserMedia({
+            console.log('[CameraView] Alternando para lente Ultra Wide nativa por deviceId:', ultraCam.label);
+            newStream = await navigator.mediaDevices.getUserMedia({
               video: {
                 deviceId: { ideal: ultraCam.deviceId },
                 width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
@@ -435,13 +436,36 @@ export const CameraView: React.FC<CameraViewProps> = ({
               },
               audio: false,
             });
+          } else {
+            // Em iPhones recentes (iOS 16.4+ / 17+), solicitar zoom: 0.5 ativa a câmera ultra-wide virtual
+            console.log('[CameraView] Solicitando lente Ultra Wide via restrição WebKit (zoom: 0.5)...');
+            try {
+              newStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  facingMode: { ideal: 'environment' },
+                  // @ts-ignore
+                  zoom: 0.5,
+                  width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+                  height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+                },
+                audio: false,
+              });
+            } catch (errWebKit) {
+              console.warn('[CameraView] WebKit zoom constraint 0.5 failed:', errWebKit);
+            }
+          }
 
+          if (newStream) {
             if (streamRef.current && streamRef.current !== localTransmittingStream && streamRef.current !== remoteStream) {
               streamRef.current.getTracks().forEach((t) => t.stop());
             }
 
             streamRef.current = newStream;
             setStream(newStream);
+            if (videoRef.current) {
+              videoRef.current.srcObject = newStream;
+              videoRef.current.play().catch(() => {});
+            }
             isUltraWideActiveRef.current = true;
             setIsHardwareZoomActive(true);
             return;
@@ -461,9 +485,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
 
         try {
           const mainCam = await findMainBackCamera();
+          let newStream: MediaStream | null = null;
           if (mainCam && mainCam.deviceId) {
             console.log('[CameraView] Retornando para lente Principal:', mainCam.label);
-            const newStream = await navigator.mediaDevices.getUserMedia({
+            newStream = await navigator.mediaDevices.getUserMedia({
               video: {
                 deviceId: { ideal: mainCam.deviceId },
                 width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
@@ -471,13 +496,29 @@ export const CameraView: React.FC<CameraViewProps> = ({
               },
               audio: false,
             });
+          } else {
+            console.log('[CameraView] Retornando para lente Principal padrão...');
+            newStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: cameraSettings.resolution === '720P' ? 1280 : 1920 },
+                height: { ideal: cameraSettings.resolution === '720P' ? 720 : 1080 },
+              },
+              audio: false,
+            });
+          }
 
+          if (newStream) {
             if (streamRef.current && streamRef.current !== localTransmittingStream && streamRef.current !== remoteStream) {
               streamRef.current.getTracks().forEach((t) => t.stop());
             }
 
             streamRef.current = newStream;
             setStream(newStream);
+            if (videoRef.current) {
+              videoRef.current.srcObject = newStream;
+              videoRef.current.play().catch(() => {});
+            }
             isUltraWideActiveRef.current = false;
             applyHardwareZoom(newStream.getVideoTracks()[0], targetZoom);
             return;
@@ -487,7 +528,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         }
       }
     },
-    [cameraSettings.facingMode, cameraSettings.resolution, cameraSettings.selectedVideoDeviceId, localTransmittingStream, remoteStream, stream]
+    [cameraSettings.facingMode, cameraSettings.resolution, cameraSettings.selectedVideoDeviceId, localTransmittingStream, remoteStream, stream, videoRef]
   );
 
   // Hardware zoom on active track when zoom changes
@@ -673,6 +714,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
         applyHardwareZoom(currentTrack, rounded);
       }
 
+      // Se desceu para <= 0.6x, aciona a troca para lente ultra-wide
+      if (rounded <= 0.6) {
+        handleLensSwitchIfNeeded(0.5);
+      } else if (rounded >= 1.0 && isUltraWideActiveRef.current) {
+        handleLensSwitchIfNeeded(rounded);
+      }
+
       wifiMidiBridge.requestRemoteZoom(rounded);
     }
   };
@@ -692,16 +740,20 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   };
 
-  // Escala visual aplicada na tag video
-  // Se estiver em 0.5x com a lente ultra wide nativa ativa, a escala é 1 (enquadramento ultra amplo total)
-  // Durante o gesto de pinça ativo, utiliza livePinchScale para resposta instantânea a 60fps
+  // Escala visual aplicada na tag video:
+  // Se a lente física Ultra Wide nativa estiver ativa (FOV ultra-amplo do iPhone já aberto):
+  //   - Em 0.5x, ocupa 100% da viewport (escala 1.0)
+  //   - De 0.6x a 0.9x, escala é (effectiveZoom / 0.5)
+  // Se a lente for a normal (1x):
+  //   - Para aproximar (>= 1.0x), escala proporcional (1.0x, 1.5x, 2.0x, 4.0x) ou zoom de hardware
+  //   - Para desaproximar (< 1.0x, como 0.9x, 0.8x, 0.7x, 0.5x):
+  //     a imagem desaproxima suavemente (0.9, 0.8, 0.7, 0.5) em vez de travar em 1x!
   const effectiveZoom = isPinching && livePinchScale !== null ? livePinchScale : (cameraSettings.zoom ?? 1);
-  const visualZoomScale =
-    effectiveZoom <= 0.6 && (isHardwareZoomActive || isUltraWideActiveRef.current)
-      ? 1
-      : isHardwareZoomActive && effectiveZoom >= 1
-      ? 1
-      : Math.max(1, effectiveZoom);
+  const visualZoomScale = isUltraWideActiveRef.current
+    ? Math.max(1, effectiveZoom / 0.5)
+    : isHardwareZoomActive && effectiveZoom >= 1
+    ? 1
+    : Math.max(0.5, effectiveZoom);
 
   return (
     <div

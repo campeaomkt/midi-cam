@@ -42,30 +42,31 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
       {/* Zoom Selector Row (matching 0,5 - 1x - 2 - 4 in screenshot) */}
       <div className="flex items-center gap-2 md:gap-3 bg-black/45 backdrop-blur-md px-3 py-1 md:px-4 md:py-1.5 rounded-full border border-white/10 shadow-lg text-xs md:text-sm font-bold">
         {zoomLevels.map((lvl) => {
+          const currentZoom = cameraSettings.zoom ?? 1;
           const isSelected =
-            cameraSettings.zoom === lvl ||
-            (lvl === 0.5 && cameraSettings.zoom <= 0.6) ||
-            (lvl === 1 && cameraSettings.zoom > 0.6 && cameraSettings.zoom <= 1.4) ||
-            (lvl === 2 && cameraSettings.zoom > 1.4 && cameraSettings.zoom < 3) ||
-            (lvl === 4 && cameraSettings.zoom >= 3);
+            currentZoom === lvl ||
+            (lvl === 0.5 && currentZoom <= 0.6) ||
+            (lvl === 1 && currentZoom > 0.6 && currentZoom <= 1.4) ||
+            (lvl === 2 && currentZoom > 1.4 && currentZoom < 3) ||
+            (lvl === 4 && currentZoom >= 3);
 
           const displayLabel = () => {
             if (lvl === 0.5) return '0,5';
             if (lvl === 1) {
-              if (isSelected && cameraSettings.zoom > 0.6 && cameraSettings.zoom <= 1.4 && cameraSettings.zoom !== 1) {
-                return `${cameraSettings.zoom.toFixed(1)}x`;
+              if (isSelected && currentZoom > 0.6 && currentZoom <= 1.4 && currentZoom !== 1) {
+                return `${currentZoom.toFixed(1)}x`;
               }
               return '1x';
             }
             if (lvl === 2) {
-              if (isSelected && cameraSettings.zoom > 1.4 && cameraSettings.zoom < 3 && cameraSettings.zoom !== 2) {
-                return `${cameraSettings.zoom.toFixed(1)}x`;
+              if (isSelected && currentZoom > 1.4 && currentZoom < 3 && currentZoom !== 2) {
+                return `${currentZoom.toFixed(1)}x`;
               }
               return '2';
             }
             if (lvl === 4) {
-              if (isSelected && cameraSettings.zoom >= 3 && cameraSettings.zoom !== 4) {
-                return `${cameraSettings.zoom.toFixed(1)}x`;
+              if (isSelected && currentZoom >= 3 && currentZoom !== 4) {
+                return `${currentZoom.toFixed(1)}x`;
               }
               return '4';
             }

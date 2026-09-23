@@ -65,7 +65,7 @@ export type KeyboardTheme =
 
 export type KeyCount = 25 | 32 | 37 | 44 | 49 | 61 | 64 | 73 | 76 | 88;
 
-export type KeyboardVisualModel = 'realistic-3d' | 'realistic-acoustic' | 'flat-minimal';
+export type KeyboardVisualModel = 'realistic-3d' | 'realistic-acoustic' | 'realistic-gloss' | 'flat-minimal';
 
 export interface KeyboardSettings {
   visualModel?: KeyboardVisualModel;
