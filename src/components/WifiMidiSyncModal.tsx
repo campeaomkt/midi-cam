@@ -126,8 +126,6 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
     }
   }, [syncStatus.mode, syncStatus.roomCode]);
 
-  if (!isOpen) return null;
-
   const handleStartHost = async () => {
     await wifiMidiBridge.startHost();
     if (onRequestMidi) onRequestMidi();
@@ -273,6 +271,8 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
   }, [isOpen, isScanningQr, stopQrScanner]);
 
   const midiDevices = midiManager.getDevices();
+
+  if (!isOpen) return null;
 
   return (
     <div
