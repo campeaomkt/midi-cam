@@ -9,7 +9,19 @@ export type WifiSyncMessage =
   | { type: 'ping'; time: number }
   | { type: 'pong'; time: number }
   | { type: 'deviceInfo'; name: string; devices?: string[] }
-  | { type: 'cameraStreamState'; isStreaming: boolean };
+  | { type: 'cameraStreamState'; isStreaming: boolean; facingMode?: string; resolution?: string }
+  | { type: 'requestStartCamera'; facingMode?: 'environment' | 'user'; resolution?: '1080P' | '720P' }
+  | { type: 'requestStopCamera' };
+
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.services.mozilla.com' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
 
 export type WifiSyncListener = (status: WifiSyncStatus) => void;
 
@@ -119,10 +131,7 @@ class WifiMidiBridge {
         const peer = new Peer(peerId, {
           debug: 0,
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-            ],
+            iceServers: ICE_SERVERS,
           },
         });
 
@@ -209,6 +218,10 @@ class WifiMidiBridge {
           this.notifyRemoteStream(null);
           this.notify();
         }
+      } else if (msg && msg.type === 'requestStartCamera') {
+        this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P');
+      } else if (msg && msg.type === 'requestStopCamera') {
+        this.stopCameraStream();
       }
     });
 
@@ -299,10 +312,7 @@ class WifiMidiBridge {
         const peer = new Peer({
           debug: 0,
           config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-            ],
+            iceServers: ICE_SERVERS,
           },
         });
 
@@ -355,6 +365,10 @@ class WifiMidiBridge {
                 this.notifyRemoteStream(null);
                 this.notify();
               }
+            } else if (msg.type === 'requestStartCamera') {
+              this.startCameraStream(msg.facingMode || 'environment', msg.resolution || '1080P');
+            } else if (msg.type === 'requestStopCamera') {
+              this.stopCameraStream();
             }
           });
 
@@ -416,19 +430,34 @@ class WifiMidiBridge {
     console.log('[WiFi Bridge] Incoming camera stream call from peer:', call.peer);
     this.activeMediaCall = call;
 
-    // Answer call (we act as the receiver of the mobile video feed)
-    try {
-      call.answer();
-    } catch (e) {
-      console.warn('[WiFi Bridge] Error answering media call:', e);
-    }
-
-    call.on('stream', (remoteStream: MediaStream) => {
+    const onStreamReady = (remoteStream: MediaStream) => {
       console.log('[WiFi Bridge] Remote camera stream received! Tracks:', remoteStream.getTracks().length);
+      remoteStream.getVideoTracks().forEach((track) => {
+        track.enabled = true;
+      });
       this.remoteCameraStream = remoteStream;
       this.notifyRemoteStream(remoteStream);
       this.notify();
+    };
+
+    call.on('stream', (remoteStream: MediaStream) => {
+      onStreamReady(remoteStream);
     });
+
+    // Native RTCPeerConnection fallback for cross-browser safety (Chrome/Safari/Firefox)
+    try {
+      // @ts-ignore
+      const pc: RTCPeerConnection = call.peerConnection;
+      if (pc) {
+        pc.ontrack = (event: RTCTrackEvent) => {
+          console.log('[WiFi Bridge] RTCPeerConnection ontrack event:', event.track.kind);
+          const s = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+          onStreamReady(s);
+        };
+      }
+    } catch (e) {
+      console.warn('[WiFi Bridge] Error setting ontrack fallback:', e);
+    }
 
     call.on('close', () => {
       console.log('[WiFi Bridge] Remote camera call ended');
@@ -442,6 +471,13 @@ class WifiMidiBridge {
     call.on('error', (err: unknown) => {
       console.warn('[WiFi Bridge] Remote camera call error:', err);
     });
+
+    // Answer call (we act as the receiver of the mobile video feed)
+    try {
+      call.answer();
+    } catch (e) {
+      console.warn('[WiFi Bridge] Error answering media call:', e);
+    }
   }
 
   /**
@@ -467,6 +503,7 @@ class WifiMidiBridge {
       const heightIdeal = resolution === '720P' ? 720 : 1080;
 
       let stream: MediaStream | null = null;
+      // 1. Try High-resolution 60fps
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -478,11 +515,35 @@ class WifiMidiBridge {
           audio: false,
         });
       } catch (e1) {
-        console.warn('[WiFi Camera] High-res constraints failed, falling back to basic video', e1);
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode },
-          audio: false,
-        });
+        console.warn('[WiFi Camera] 60fps failed, falling back to 30fps', e1);
+        // 2. Try High-resolution 30fps
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: widthIdeal },
+              height: { ideal: heightIdeal },
+              frameRate: { ideal: 30 },
+            },
+            audio: false,
+          });
+        } catch (e2) {
+          console.warn('[WiFi Camera] 30fps failed, falling back to facingMode', e2);
+          // 3. Fallback to basic facingMode
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode },
+              audio: false,
+            });
+          } catch (e3) {
+            console.warn('[WiFi Camera] basic facingMode failed, falling back to video: true', e3);
+            // 4. Ultimate fallback: any available video
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: false,
+            });
+          }
+        }
       }
 
       if (!stream) {
@@ -504,17 +565,30 @@ class WifiMidiBridge {
         const hostPeerId = this.formatPeerId(this.roomCode);
         const call = this.peer.call(hostPeerId, stream);
         this.activeMediaCall = call;
+        call.on('error', (err) => console.warn('[WiFi Camera Call Error]', err));
+
         if (this.activeClientConnection && this.activeClientConnection.open) {
-          this.activeClientConnection.send({ type: 'cameraStreamState', isStreaming: true });
+          this.activeClientConnection.send({
+            type: 'cameraStreamState',
+            isStreaming: true,
+            facingMode,
+            resolution,
+          });
         }
       } else if (this.mode === 'host' && this.connections.size > 0) {
         this.connections.forEach((conn) => {
           if (this.peer) {
             const call = this.peer.call(conn.peer, stream);
             this.activeMediaCall = call;
+            call.on('error', (err) => console.warn('[WiFi Camera Call Error]', err));
           }
         });
-        this.broadcastMessage({ type: 'cameraStreamState', isStreaming: true });
+        this.broadcastMessage({
+          type: 'cameraStreamState',
+          isStreaming: true,
+          facingMode,
+          resolution,
+        });
       }
 
       this.notify();
@@ -525,6 +599,37 @@ class WifiMidiBridge {
       this.isStreamingCameraFlag = false;
       this.notify();
       return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Envia comando para o outro dispositivo iniciar a câmera e transmitir
+   */
+  public requestRemoteStartCamera(
+    facingMode: 'environment' | 'user' = 'environment',
+    resolution: '1080P' | '720P' = '1080P'
+  ) {
+    const msg: WifiSyncMessage = {
+      type: 'requestStartCamera',
+      facingMode,
+      resolution,
+    };
+    if (this.mode === 'host') {
+      this.broadcastMessage(msg);
+    } else if (this.mode === 'client' && this.activeClientConnection) {
+      this.activeClientConnection.send(msg);
+    }
+  }
+
+  /**
+   * Envia comando para o outro dispositivo parar a transmissão da câmera
+   */
+  public requestRemoteStopCamera() {
+    const msg: WifiSyncMessage = { type: 'requestStopCamera' };
+    if (this.mode === 'host') {
+      this.broadcastMessage(msg);
+    } else if (this.mode === 'client' && this.activeClientConnection) {
+      this.activeClientConnection.send(msg);
     }
   }
 

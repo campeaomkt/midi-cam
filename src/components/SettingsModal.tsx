@@ -32,6 +32,7 @@ import {
   KEYBOARD_COLOR_PALETTE,
   getEffectiveActiveColor,
 } from '../utils/keyboardColor';
+import { wifiMidiBridge } from '../utils/wifiMidiBridge';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -982,10 +983,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <select
               id="select-camera-device"
               value={cameraSettings.selectedVideoDeviceId || ''}
-              onChange={(e) => onUpdateCamera({ selectedVideoDeviceId: e.target.value || undefined })}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'mobile-wifi-camera') {
+                  if (wifiSyncStatus?.isConnected) {
+                    wifiMidiBridge.requestRemoteStartCamera('environment', '1080P');
+                  } else if (onOpenWifiSync) {
+                    onOpenWifiSync();
+                  }
+                }
+                onUpdateCamera({ selectedVideoDeviceId: val || undefined });
+              }}
               className="w-full bg-zinc-900 border border-white/15 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 cursor-pointer"
             >
               <option value="">Câmera Automática / Padrão ({cameraSettings.facingMode === 'user' ? 'Frontal' : 'Traseira'})</option>
+              <option value="mobile-wifi-camera">📱 Câmera Wi-Fi do Celular (Modo Iriun Webcam)</option>
               {cameras && cameras.map((cam, idx) => {
                 const isVirtual = /iriun|obs|droidcam|virtual|vcam/i.test(cam.label || '');
                 return (
@@ -997,12 +1009,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </select>
           </div>
 
-          {/* Espelhar Câmera Toggle */}
+          {/* DEDICATED CARD: Usar Celular como Webcam (Modo Iriun Webcam) */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-zinc-900/60 to-black/80 border border-cyan-500/40 space-y-3 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                  <Smartphone className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>Câmera do Celular como Webcam</span>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
+                      Modo Iriun Wi-Fi
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-zinc-400 leading-tight mt-0.5">
+                    Transmita a câmera de alta definição do celular sem fios direto para a tela do PC
+                  </p>
+                </div>
+              </div>
+
+              {wifiSyncStatus?.hasRemoteCameraStream && (
+                <span className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 text-[10px] font-bold animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                  HD 60 FPS Ativo
+                </span>
+              )}
+            </div>
+
+            {wifiSyncStatus?.hasRemoteCameraStream ? (
+              <div className="space-y-2">
+                <div className="p-2.5 rounded-xl bg-black/50 border border-cyan-500/30 text-xs text-cyan-200 flex items-center justify-between">
+                  <span className="text-[11px]">Câmera remota do celular espelhada na tela do computador.</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => wifiMidiBridge.requestRemoteStartCamera('environment', '1080P')}
+                    className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-semibold transition cursor-pointer border border-white/10"
+                  >
+                    Lente Traseira (Piano)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => wifiMidiBridge.requestRemoteStopCamera()}
+                    className="py-1.5 px-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-[11px] font-semibold transition cursor-pointer"
+                  >
+                    Parar Câmera Celular
+                  </button>
+                </div>
+              </div>
+            ) : wifiSyncStatus?.isConnected ? (
+              <div className="space-y-2">
+                <div className="p-2 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Celular conectado ao PC ({wifiSyncStatus.hostDeviceName || 'Dispositivo Wi-Fi'})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => wifiMidiBridge.requestRemoteStartCamera('environment', '1080P')}
+                  className="w-full py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                >
+                  <Video className="w-3.5 h-3.5" />
+                  <span>Iniciar Câmera do Celular para o PC</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[11px] text-zinc-300">
+                  Aponte a câmera do celular para o QR Code da sala para conectar em 3 segundos.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenWifiSync) onOpenWifiSync();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Wifi className="w-3.5 h-3.5" />
+                  <span>Conectar Celular via QR Code / Wi-Fi</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Inverter Horizontalmente (Efeito Espelho) */}
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900/80 border border-white/10">
             <div>
-              <span className="text-xs font-bold text-white block">Espelhar Vídeo (Modo Selfie/Espelho)</span>
+              <span className="text-xs font-bold text-white block">Inverter Vídeo Horizontalmente (Efeito Espelho)</span>
               <span className="text-[10.5px] text-zinc-400 block">
-                Inverte o vídeo horizontalmente para manter a orientação natural das mãos
+                Inverte a imagem da câmera local do PC como se fosse um espelho (não conecta ao celular)
               </span>
             </div>
             <button
@@ -1022,7 +1118,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'bg-zinc-800 text-zinc-400 hover:text-white border border-white/10'
               }`}
             >
-              {(cameraSettings.mirrorVideo ?? (cameraSettings.facingMode === 'user')) ? 'Espelhado (Ativo)' : 'Normal'}
+              {(cameraSettings.mirrorVideo ?? (cameraSettings.facingMode === 'user')) ? 'Invertido (Ativo)' : 'Normal'}
             </button>
           </div>
 

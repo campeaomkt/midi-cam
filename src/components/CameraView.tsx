@@ -64,9 +64,19 @@ export const CameraView: React.FC<CameraViewProps> = ({
     const unsub = wifiMidiBridge.subscribeRemoteStream((rStream) => {
       console.log('[CameraView] Remote camera stream changed:', !!rStream);
       setRemoteStream(rStream);
+      if (rStream) {
+        setUseRemoteCamera(true);
+      }
     });
     return unsub;
   }, []);
+
+  // When user selects mobile-wifi-camera in Settings, switch to remote camera
+  useEffect(() => {
+    if (cameraSettings.selectedVideoDeviceId === 'mobile-wifi-camera') {
+      setUseRemoteCamera(true);
+    }
+  }, [cameraSettings.selectedVideoDeviceId]);
 
   // Detect iOS WebKit environment
   const isIOS =
@@ -287,6 +297,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
 
     video.addEventListener('playing', handlePlaying);
+    video.addEventListener('timeupdate', handlePlaying);
 
     const tryPlay = () => {
       video
@@ -304,10 +315,16 @@ export const CameraView: React.FC<CameraViewProps> = ({
       tryPlay();
     } else {
       video.addEventListener('loadedmetadata', tryPlay, { once: true });
+      video.addEventListener('canplay', tryPlay, { once: true });
     }
+
+    tryPlay();
 
     return () => {
       video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('timeupdate', handlePlaying);
+      video.removeEventListener('loadedmetadata', tryPlay);
+      video.removeEventListener('canplay', tryPlay);
     };
   }, [stream, videoRef]);
 
@@ -654,7 +671,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
           </span>
           <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Câmera Celular (Wi-Fi 60 FPS)</span>
+          <span>Câmera do Celular (Wi-Fi 60 FPS)</span>
           <button
             type="button"
             onClick={(e) => {
@@ -662,9 +679,9 @@ export const CameraView: React.FC<CameraViewProps> = ({
               setUseRemoteCamera(false);
             }}
             className="ml-1 px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] text-zinc-300 hover:text-white transition cursor-pointer"
-            title="Usar webcam do PC"
+            title="Mudar para a webcam do computador"
           >
-            Webcam PC
+            Usar Webcam PC
           </button>
         </div>
       )}
@@ -679,10 +696,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
               e.stopPropagation();
               setUseRemoteCamera(true);
             }}
-            className="ml-1 px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-[10px] text-cyan-300 font-bold transition cursor-pointer"
+            className="ml-1 px-2.5 py-0.5 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-[10px] transition cursor-pointer shadow-sm"
             title="Alternar para a câmera remota do celular"
           >
-            Espelhar Celular
+            Usar Câmera do Celular
           </button>
         </div>
       )}

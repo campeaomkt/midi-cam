@@ -514,24 +514,64 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                       </div>
                     )}
 
-                    {syncStatus.hasRemoteCameraStream && (
-                      <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-500/40 space-y-1 animate-fade-in">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Video className="w-4 h-4 text-cyan-400" />
-                            <span className="text-xs font-bold text-cyan-200">
-                              Câmera do Celular Espelhada (Modo Iriun 60 FPS)
-                            </span>
+                    {/* Remote Camera Controls for PC Host */}
+                    <div className="p-3.5 rounded-xl bg-black/60 border border-cyan-500/40 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400">
+                            <Video className="w-4 h-4" />
                           </div>
-                          <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold">
+                          <div>
+                            <h5 className="font-bold text-xs text-cyan-200">
+                              Câmera do Celular como Webcam (Modo Iriun Wi-Fi)
+                            </h5>
+                            <p className="text-[11px] text-zinc-400">
+                              Transmita a câmera do celular em 1080p 60 FPS direto para a tela do PC
+                            </p>
+                          </div>
+                        </div>
+
+                        {syncStatus.hasRemoteCameraStream && (
+                          <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold animate-pulse">
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
                             Ativa no PC
                           </span>
-                        </div>
-                        <p className="text-[11px] text-zinc-300 leading-relaxed">
-                          O visor do seu PC agora está usando a câmera de alta definição do celular via Wi-Fi. Grave e visualize tudo sincronizado!
-                        </p>
+                        )}
                       </div>
-                    )}
+
+                      {syncStatus.hasRemoteCameraStream ? (
+                        <div className="space-y-2">
+                          <p className="text-[11px] text-zinc-300 leading-relaxed">
+                            O visor do seu PC agora está usando a câmera de alta definição do celular via Wi-Fi. Grave e visualize tudo sincronizado!
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => wifiMidiBridge.requestRemoteStartCamera('environment', '1080P')}
+                              className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-white/10 transition cursor-pointer"
+                            >
+                              Lente Traseira (Piano)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => wifiMidiBridge.requestRemoteStopCamera()}
+                              className="py-1.5 px-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-semibold transition cursor-pointer"
+                            >
+                              Parar Câmera Remota
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => wifiMidiBridge.requestRemoteStartCamera('environment', '1080P')}
+                          className="w-full py-2.5 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                        >
+                          <Video className="w-4 h-4" />
+                          <span>Acionar Câmera do Celular para Este PC (1080p 60 FPS)</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Local MIDI Ports on PC */}
