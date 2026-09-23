@@ -16,6 +16,7 @@ import {
   Music,
   Wifi,
   Video,
+  QrCode,
 } from 'lucide-react';
 
 interface TopHudBarProps {
@@ -262,7 +263,10 @@ export const TopHudBar: React.FC<TopHudBarProps> = ({
               ) : wifiSyncStatus?.mode === 'host' ? (
                 <span className="font-mono text-[11px] font-bold text-cyan-300">{wifiSyncStatus.roomCode}</span>
               ) : (
-                <span className="whitespace-nowrap text-[11px] font-semibold">Wi-Fi PC</span>
+                <span className="flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold">
+                  <QrCode className="w-3 h-3 text-cyan-400" />
+                  <span>Ler QR / Wi-Fi</span>
+                </span>
               )}
             </button>
           )}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect, useId, useRef, useCallback } from 'react';
 import {
   Wifi,
   Radio,
@@ -19,8 +19,11 @@ import {
   Video,
   VideoOff,
   Camera,
+  ScanLine,
+  SwitchCamera,
 } from 'lucide-react';
 import QRCode from 'qrcode';
+import jsQR from 'jsqr';
 import { wifiMidiBridge } from '../utils/wifiMidiBridge';
 import { midiManager } from '../utils/midiManager';
 import { WifiSyncStatus } from '../types';
@@ -29,6 +32,27 @@ interface WifiMidiSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRequestMidi?: () => void;
+}
+
+function extractSyncCode(raw: string): string {
+  const trimmed = raw.trim();
+  try {
+    const url = new URL(trimmed);
+    const syncParam = url.searchParams.get('sync');
+    if (syncParam) return syncParam.toUpperCase();
+  } catch {}
+
+  const match = trimmed.match(/[?&]sync=([A-Za-z0-9_-]+)/i);
+  if (match && match[1]) {
+    return match[1].toUpperCase();
+  }
+
+  const codeMatch = trimmed.match(/MC-[A-Z0-9]{3,10}/i);
+  if (codeMatch) {
+    return codeMatch[0].toUpperCase();
+  }
+
+  return trimmed.toUpperCase();
 }
 
 export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
@@ -47,6 +71,17 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [cameraResolution, setCameraResolution] = useState<'1080P' | '720P'>('1080P');
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  // In-app QR Code Scanner state
+  const [isScanningQr, setIsScanningQr] = useState(false);
+  const [qrScanError, setQrScanError] = useState<string | null>(null);
+  const [qrScannerFacing, setQrScannerFacing] = useState<'environment' | 'user'>('environment');
+
+  const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scannerStreamRef = useRef<MediaStream | null>(null);
+  const scanRafRef = useRef<number | null>(null);
+
   const inputCodeId = useId();
 
   // Subscribe to Wi-Fi sync status changes
@@ -140,6 +175,104 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
       }
     }
   };
+
+  const stopQrScanner = useCallback(() => {
+    if (scanRafRef.current) {
+      cancelAnimationFrame(scanRafRef.current);
+      scanRafRef.current = null;
+    }
+    if (scannerStreamRef.current) {
+      scannerStreamRef.current.getTracks().forEach((track) => track.stop());
+      scannerStreamRef.current = null;
+    }
+    if (scannerVideoRef.current) {
+      scannerVideoRef.current.srcObject = null;
+    }
+    setIsScanningQr(false);
+  }, []);
+
+  const startQrScanner = useCallback(
+    async (facing: 'environment' | 'user' = qrScannerFacing) => {
+      stopQrScanner();
+      setIsScanningQr(true);
+      setQrScanError(null);
+
+      try {
+        let stream: MediaStream | null = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: facing } },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+
+        scannerStreamRef.current = stream;
+        if (scannerVideoRef.current) {
+          scannerVideoRef.current.srcObject = stream;
+          scannerVideoRef.current.setAttribute('playsinline', 'true');
+          await scannerVideoRef.current.play().catch(() => {});
+        }
+
+        const scanLoop = () => {
+          if (!scannerVideoRef.current) return;
+          const video = scannerVideoRef.current;
+          if (video.readyState >= 2) {
+            if (!scannerCanvasRef.current) {
+              scannerCanvasRef.current = document.createElement('canvas');
+            }
+            const canvas = scannerCanvasRef.current;
+            if (video.videoWidth && video.videoHeight) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const qr = jsQR(imgData.data, imgData.width, imgData.height, {
+                  inversionAttempts: 'dontInvert',
+                });
+                if (qr && qr.data) {
+                  const code = extractSyncCode(qr.data);
+                  if (code) {
+                    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                      navigator.vibrate([60, 40, 60]);
+                    }
+                    setInputCode(code);
+                    stopQrScanner();
+                    wifiMidiBridge.connectClient(code);
+                    return;
+                  }
+                }
+              }
+            }
+          }
+          scanRafRef.current = requestAnimationFrame(scanLoop);
+        };
+
+        scanRafRef.current = requestAnimationFrame(scanLoop);
+      } catch (err: unknown) {
+        console.error('[QR Scanner] Error accessing camera:', err);
+        setQrScanError('Não foi possível acessar a câmera para ler o QR Code. Verifique as permissões.');
+        stopQrScanner();
+      }
+    },
+    [qrScannerFacing, stopQrScanner]
+  );
+
+  // Stop scanner when modal closes or unmounts
+  useEffect(() => {
+    if (!isOpen && isScanningQr) {
+      stopQrScanner();
+    }
+    return () => {
+      stopQrScanner();
+    };
+  }, [isOpen, isScanningQr, stopQrScanner]);
 
   const midiDevices = midiManager.getDevices();
 
@@ -356,55 +489,171 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                   </button>
                 </div>
               ) : (
-                <form onSubmit={handleConnectClient} className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-zinc-800/60 border border-white/10 space-y-3">
-                    <div className="flex items-center gap-2 text-zinc-200 font-semibold">
-                      <QrCode className="w-4 h-4 text-cyan-400" />
-                      <span>Conectar ao MIDI do seu Computador</span>
-                    </div>
+                <div className="space-y-4">
+                  {/* IN-APP QR CODE SCANNER (CELULAR LÊ A TELA DO PC) */}
+                  {isScanningQr ? (
+                    <div className="relative overflow-hidden rounded-2xl bg-black border-2 border-cyan-500 shadow-2xl p-3.5 flex flex-col items-center gap-3 animate-fade-in">
+                      <div className="w-full flex items-center justify-between px-1 text-xs">
+                        <div className="flex items-center gap-2 text-cyan-300 font-bold">
+                          <ScanLine className="w-4 h-4 animate-pulse text-cyan-400" />
+                          <span>Lendo QR Code na tela do PC...</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextFacing = qrScannerFacing === 'environment' ? 'user' : 'environment';
+                              setQrScannerFacing(nextFacing);
+                              startQrScanner(nextFacing);
+                            }}
+                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-zinc-300 transition cursor-pointer"
+                            title="Alternar Câmera"
+                          >
+                            <SwitchCamera className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopQrScanner}
+                            className="p-1.5 rounded-lg bg-white/10 hover:bg-red-500/20 text-zinc-300 hover:text-red-300 transition cursor-pointer"
+                            title="Fechar Câmera"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
 
-                    <p className="text-xs text-zinc-400 leading-relaxed">
-                      Abra o <strong>MIDI-Cam</strong> no navegador do seu PC (ou app nativo), clique na aba <strong>Transmissor (PC)</strong> e digite aqui o código de 6 dígitos que aparecer na tela do computador:
-                    </p>
-
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor={inputCodeId} className="text-xs text-zinc-400 font-medium">
-                        Código do Computador:
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          id={inputCodeId}
-                          type="text"
-                          maxLength={8}
-                          value={inputCode}
-                          onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                          placeholder="EX: MC-8924"
-                          className="flex-1 bg-black/60 border border-white/20 rounded-xl px-4 py-2.5 font-mono text-center font-bold tracking-widest text-lg text-cyan-300 uppercase placeholder:text-zinc-600 focus:outline-none focus:border-cyan-400"
+                      {/* Video Viewfinder */}
+                      <div className="relative w-full aspect-square max-h-64 rounded-xl overflow-hidden bg-zinc-950 flex items-center justify-center border border-cyan-500/40 shadow-inner">
+                        <video
+                          ref={scannerVideoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-full object-cover"
                         />
-                        <button
-                          type="submit"
-                          disabled={!inputCode.trim() || syncStatus.isConnecting}
-                          className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-black font-bold text-sm transition flex items-center gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.35)] cursor-pointer"
-                        >
-                          {syncStatus.isConnecting ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <span>Conectar</span>
-                              <ArrowRight className="w-4 h-4" />
-                            </>
-                          )}
-                        </button>
+                        {/* Targeting reticle */}
+                        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                          <div className="w-48 h-48 border-2 border-cyan-400/80 rounded-2xl relative shadow-[0_0_30px_rgba(6,182,212,0.4)]">
+                            <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-cyan-300 -mt-0.5 -ml-0.5 rounded-tl-sm"></div>
+                            <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-cyan-300 -mt-0.5 -mr-0.5 rounded-tr-sm"></div>
+                            <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-cyan-300 -mb-0.5 -ml-0.5 rounded-bl-sm"></div>
+                            <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-cyan-300 -mb-0.5 -mr-0.5 rounded-br-sm"></div>
+                            <div className="absolute left-1 right-1 h-0.5 bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_12px_#22d3ee] animate-bounce top-1/2 -translate-y-1/2"></div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
 
-                    {syncStatus.error && (
-                      <div className="p-3 rounded-xl bg-red-900/30 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
-                        <span>{syncStatus.error}</span>
+                      <p className="text-[11px] text-zinc-300 text-center font-medium">
+                        Aponte para o QR Code que aparece na tela do seu computador.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={stopQrScanner}
+                        className="w-full py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition cursor-pointer"
+                      >
+                        Cancelar Leitor / Digitar Código
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-cyan-950/50 via-zinc-900 to-black border border-cyan-500/50 space-y-3 shadow-xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                            <QrCode className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                              <span>Ler QR Code do Computador</span>
+                              <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/40">
+                                Automático
+                              </span>
+                            </h4>
+                            <p className="text-xs text-zinc-400">
+                              Aponte a câmera para a tela do PC para conectar sem digitar
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    )}
+
+                      {qrScanError && (
+                        <div className="p-2.5 rounded-xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                          <span>{qrScanError}</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => startQrScanner()}
+                        className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black font-extrabold text-sm tracking-wide transition shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center gap-2.5 cursor-pointer active:scale-98"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>Abrir Câmera e Ler QR Code</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3 py-1">
+                    <div className="flex-1 h-px bg-white/10"></div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                      Ou digite o código manualmente
+                    </span>
+                    <div className="flex-1 h-px bg-white/10"></div>
                   </div>
+
+                  {/* Manual Code Input Form */}
+                  <form onSubmit={handleConnectClient} className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-zinc-800/60 border border-white/10 space-y-3">
+                      <div className="flex items-center gap-2 text-zinc-200 font-semibold">
+                        <Terminal className="w-4 h-4 text-cyan-400" />
+                        <span>Código do Computador</span>
+                      </div>
+
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        Abra o <strong>MIDI-Cam</strong> no PC, veja a aba <strong>Transmissor (PC)</strong> e digite o código que aparece lá:
+                      </p>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor={inputCodeId} className="text-xs text-zinc-400 font-medium">
+                          Código de 6 dígitos:
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            id={inputCodeId}
+                            type="text"
+                            maxLength={8}
+                            value={inputCode}
+                            onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                            placeholder="EX: MC-8924"
+                            className="flex-1 bg-black/60 border border-white/20 rounded-xl px-4 py-2.5 font-mono text-center font-bold tracking-widest text-lg text-cyan-300 uppercase placeholder:text-zinc-600 focus:outline-none focus:border-cyan-400"
+                          />
+                          <button
+                            type="submit"
+                            disabled={!inputCode.trim() || syncStatus.isConnecting}
+                            className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-black font-bold text-sm transition flex items-center gap-1.5 shadow-[0_0_15px_rgba(6,182,212,0.35)] cursor-pointer"
+                          >
+                            {syncStatus.isConnecting ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <span>Conectar</span>
+                                <ArrowRight className="w-4 h-4" />
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {syncStatus.error && (
+                        <div className="p-3 rounded-xl bg-red-900/30 border border-red-500/30 text-red-300 text-xs flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
+                          <span>{syncStatus.error}</span>
+                        </div>
+                      )}
+                    </div>
+                  </form>
 
                   <div className="p-3.5 rounded-xl bg-black/40 border border-white/5 space-y-2">
                     <h5 className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
@@ -417,7 +666,7 @@ export const WifiMidiSyncModal: React.FC<WifiMidiSyncModalProps> = ({
                       <li>Você também pode simplesmente <strong>apontar a câmera do celular para o QR Code</strong> na tela do PC para conectar direto sem digitar nada!</li>
                     </ul>
                   </div>
-                </form>
+                </div>
               )}
             </div>
           )}
