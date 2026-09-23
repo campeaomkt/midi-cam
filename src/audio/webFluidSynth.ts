@@ -29,7 +29,7 @@ export class WebFluidSynth {
   private loadedSFontId: number | null = null;
   private isInitialized = false;
   private isWorkletMode = false;
-  private currentGain = 0.55;
+  private currentGain = 1.0;
   private polyphony = 256;
   private destinationNode: AudioNode | null = null;
   private initPromise: Promise<void> | null = null;
@@ -254,14 +254,21 @@ export class WebFluidSynth {
   private applyEngineDefaults() {
     if (!this.synth) return;
     try {
-      // Direct gain scaling
+      // Direct gain scaling (full DAW line level)
       this.synth.setGain(this.currentGain);
       // High-quality cubic/4th-order sample interpolation (enum 2 = FLUID_INTERP_4THORDER)
       try {
         if (typeof (this.synth as any).setInterpolation === 'function') {
-          (this.synth as any).setInterpolation(2);
+          (this.synth as any).setInterpolation(2, -1);
         }
       } catch {}
+
+      // Maximize MIDI Channel Headroom (CC 7 Master Volume = 127, CC 11 Expression = 127)
+      try {
+        this.synth.midiControl(0, 7, 127);
+        this.synth.midiControl(0, 11, 127);
+      } catch {}
+
       // Disable artificial reverb so the soundfont plays 100% dry and natural, exactly as designed (standard DAW behavior)
       (this.synth as any).setReverbOn?.(false);
     } catch (e) {
@@ -422,8 +429,29 @@ export class WebFluidSynth {
 
   public noteOn(channel = 0, note: number, velocity = 96) {
     if (!this.synth) return;
-    // Direct note on to channel 0
-    this.synth.midiNoteOn(channel, note, Math.min(127, Math.max(1, velocity)));
+
+    // Professional DAW Acoustic Dynamic Scaling (Kontakt / Ableton / Pianoteq standard)
+    // In SoundFont 2 spec, default attenuation is -96dB, which causes raw velocities 1-20
+    // to be completely silent ("se eu aperto fraquinho nem som sai").
+    // Professional piano samplers calibrate to a 24dB acoustic dynamic range:
+    // vel 1 = -24dB (audible, warm, delicate pianissimo pp, never silent)
+    // vel 64 = -12dB (expressive, rich mezzo-forte mf)
+    // vel 127 = 0dB (full fortissimo ff)
+    // In decibels: targetDb = -24 * (1 - norm)
+    // FluidSynth attenuation: -40 * log10(v / 127) = targetDb
+    // Solving for v: v = 127 * 10^(0.60 * (norm - 1))
+    let synthVel: number;
+    if (velocity <= 0) {
+      synthVel = 0;
+    } else if (velocity >= 127) {
+      synthVel = 127;
+    } else {
+      const norm = (velocity - 1) / 126;
+      synthVel = Math.round(127 * Math.pow(10, 0.60 * (norm - 1)));
+      synthVel = Math.min(127, Math.max(32, synthVel));
+    }
+
+    this.synth.midiNoteOn(channel, note, synthVel);
   }
 
   public noteOff(channel = 0, note: number) {

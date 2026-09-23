@@ -261,7 +261,6 @@ export default function App() {
       }
 
       if (keyboardSettingsRef.current.soundEnabled) {
-        // Natural 1:1 hardware MIDI velocity straight from controller, identical to any standard DAW
         audioSynth.startNote(note, velocity);
       }
     });

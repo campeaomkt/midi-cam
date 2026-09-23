@@ -193,9 +193,6 @@ class AudioSynthManager {
 
   public startNote(midiNumber: number, velocity: number = 96) {
     this.initContext();
-
-    // SoundFontEngine (FluidSynth) exclusive sound motor.
-    // If no .sf2 soundfont is loaded, the application remains completely silent (mute).
     SoundFontEngine.noteOn(midiNumber, velocity);
   }
 

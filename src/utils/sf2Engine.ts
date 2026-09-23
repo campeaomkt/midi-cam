@@ -798,43 +798,36 @@ class SF2EngineManager {
           }
         }
 
-        // Voice Gain & Velocity Dynamics (SoundFont 2.04 Specification)
+        // Voice Gain & Velocity Dynamics (Professional DAW acoustic standard: 24dB dynamic range)
         const voiceGain = ctx.createGain();
 
-        // Natural dynamic curve
-        const normVel = Math.max(0.01, Math.min(1.0, velocity / 127));
-        const velGain = Math.pow(normVel, 1.8);
+        const clampedVel = Math.max(1, Math.min(127, velocity));
+        const normVel = (clampedVel - 1) / 126; // 0..1
+        // Linear decibel scaling from -24dB (audible, delicate pianissimo) to 0dB (full fortissimo)
+        const targetDb = -24 * (1 - normVel);
+        const velGain = Math.pow(10, targetDb / 20); // 0.251 at vel 1, 1.0 at vel 127
 
         // Generator initialAttenuation (centibels -> linear gain)
         const safeAttenCB = Math.min(200, Math.max(0, zone.initialAttenuation || 0));
         const atten = Math.pow(10, -safeAttenCB / 200);
 
-        // Clean headroom calibrated for acoustic polyphony
-        const nominalHeadroom = 0.45;
-        const peakGain = Math.min(0.85, velGain * atten * nominalHeadroom);
+        // Full line-level headroom
+        const nominalHeadroom = 0.85;
+        const peakGain = Math.min(1.0, velGain * atten * nominalHeadroom);
 
         // Volume Envelope (Attack, Decay to Sustain body, Release on key-up)
-        const attackSec = timecentsToSeconds(zone.attackVolEnv, 0.003);
-        const decaySec = timecentsToSeconds(zone.decayVolEnv, 4.5);
-        const releaseSec = timecentsToSeconds(zone.releaseVolEnv, 0.32);
+        const attackSec = timecentsToSeconds(zone.attackVolEnv, 0.002);
+        const decaySec = timecentsToSeconds(zone.decayVolEnv, 6.0);
+        const releaseSec = timecentsToSeconds(zone.releaseVolEnv, 0.45);
 
-        // In SoundFont 2.04: sustainVolEnv is in centibels of attenuation from peak
-        let sustainGain: number;
-        if (zone.sustainVolEnv !== undefined && zone.sustainVolEnv > 0) {
-          sustainGain = Math.max(0.0001, peakGain * Math.pow(10, -Math.min(1000, zone.sustainVolEnv) / 200));
-        } else if (!isLoop) {
-          // One-shot unlooped sample: natural decay
-          sustainGain = peakGain * 0.7;
-        } else {
-          // Looped sample: natural acoustic decay down to 25% body sustain
-          sustainGain = peakGain * 0.25;
-        }
+        // Natural acoustic body sustain (rings warmly, does not choke out the notes)
+        const sustainGain = isLoop ? peakGain * 0.65 : peakGain * 0.85;
 
         // Attack ramp
-        voiceGain.gain.setValueAtTime(0.0001, now);
-        voiceGain.gain.linearRampToValueAtTime(Math.max(0.001, peakGain), now + attackSec);
-        // Smooth exponential target decay into sustain level
-        voiceGain.gain.setTargetAtTime(sustainGain, now + attackSec, Math.max(0.2, decaySec / 3));
+        voiceGain.gain.setValueAtTime(0.001, now);
+        voiceGain.gain.linearRampToValueAtTime(Math.max(0.01, peakGain), now + attackSec);
+        // Smooth natural decay into sustain body
+        voiceGain.gain.setTargetAtTime(sustainGain, now + attackSec, Math.max(0.3, decaySec / 3));
 
         // Stereo Panning (Respects SF2 pan or sample channel, zero artificial spread)
         let panner: StereoPannerNode | undefined;
